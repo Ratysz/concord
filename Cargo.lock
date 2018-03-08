@@ -1,0 +1,4 @@
+[[package]]
+name = "concord-irc"
+version = "0.1.0"
+

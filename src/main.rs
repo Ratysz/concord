@@ -22,17 +22,26 @@ use std::thread;
 mod commands;
 
 #[derive(Debug)]
-struct OmniMessage;
+struct OmniMessage {
+    discord_channel: serenity::model::id::ChannelId,
+    text: String,
+}
 
 impl From<SerMessage> for OmniMessage {
     fn from(msg: SerMessage) -> Self {
-        OmniMessage
+        OmniMessage {
+            discord_channel: msg.channel_id,
+            text: msg.content,
+        }
     }
 }
 
 impl From<IrcMessage> for OmniMessage {
     fn from(msg: IrcMessage) -> Self {
-        OmniMessage
+        OmniMessage {
+            discord_channel: serenity::model::id::ChannelId::from(409314585137512450 as u64),
+            text: msg.to_string(),
+        }
     }
 }
 
@@ -69,19 +78,25 @@ fn main() {
     });
 
     thread::spawn(move || {
-        for msg in irc_rx.wait() {
-            info!("IRC_rx message: {:?}", msg);
+        for message in irc_rx.wait() {
+            info!("IRC_rx message: {:?}", message);
+            if let Ok(_msg) = message {
+                let msg = _msg as OmniMessage;
+                if let Err(e) = msg.discord_channel.say(format!("IRC_rx: {:?}", msg.text)) {
+                    error!("Failed to post in Discord channel");
+                }
+            }
         }
     });
 
-    thread::spawn(move || {
-        let irc_config = irc_client::Config {
-            nickname: Some("the-irc-crate".to_owned()),
-            server: Some("irc.mozilla.org".to_owned()),
-            channels: Some(vec!["#ratys-bot-test".to_owned()]),
-            ..irc_client::Config::default()
-        };
+    let irc_config = irc_client::Config {
+        nickname: Some("the-irc-crate".to_owned()),
+        server: Some("irc.mozilla.org".to_owned()),
+        channels: Some(vec!["#ratys-bot-test".to_owned()]),
+        ..irc_client::Config::default()
+    };
 
+    thread::spawn(move || {
         let mut reactor = irc_client::IrcReactor::new().unwrap();
         let client = reactor.prepare_client_and_connect(&irc_config).unwrap();
         client.identify().unwrap();
@@ -93,7 +108,6 @@ fn main() {
             }
             Ok(())
         });
-
         reactor.run().unwrap();
     });
 

@@ -1,11 +1,9 @@
-use prelude::*;
-use futures::sync::mpsc::channel;
+use protocol::*;
 use protocol::irc_crate::client::prelude::*;
-use std::thread;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
-        use serenity::model::id::ChannelId;
+        use protocol::serenity::model::id::ChannelId;
         OmniMessage {
             channel: OmniChannel {
                 discord: ChannelId::from(409314585137512450 as u64),
@@ -15,12 +13,10 @@ impl From<Message> for OmniMessage {
     }
 }
 
-pub struct IrcProtocol;
+pub struct Irc;
 
-impl OmniProtocol for IrcProtocol {
-    fn new(
-        config: OmniConfig,
-    ) -> Result<(&'static str, Sender<OmniMessage>, Receiver<OmniMessage>), &'static str> {
+impl OmniProtocol for Irc {
+    fn new(config: OmniConfig) -> OmniProtocolResult {
         let irc_config = Config {
             nickname: Some("the-irc-crate".to_owned()),
             server: Some("irc.mozilla.org".to_owned()),
@@ -31,7 +27,7 @@ impl OmniProtocol for IrcProtocol {
         let (in_tx, in_rx) = channel(10);
         let (out_tx, out_rx) = channel(10);
 
-        thread::spawn(move || {
+        let handle = thread::spawn(move || {
             let mut reactor = IrcReactor::new().unwrap();
             let client = reactor.prepare_client_and_connect(&irc_config).unwrap();
             client.identify().unwrap();
@@ -48,6 +44,7 @@ impl OmniProtocol for IrcProtocol {
             });
             reactor.run().unwrap();
         });
-        Ok(("irc", in_tx, out_rx))
+
+        Ok(("irc", in_tx, out_rx, handle))
     }
 }

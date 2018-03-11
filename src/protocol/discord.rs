@@ -1,6 +1,6 @@
 use protocol::*;
 use protocol::serenity::prelude::*;
-use protocol::serenity::model::prelude::*; //channel::Message;
+use protocol::serenity::model::prelude::*;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
@@ -19,6 +19,7 @@ struct Handler {
     tx: Sender<OmniMessage>,
 }
 
+// TODO: re-implement self-consciousness.
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
         info!("[Discord] Sent message: {:?}", msg);
@@ -37,33 +38,38 @@ impl EventHandler for Handler {
 
 impl OmniProtocol for Discord {
     fn new(config: OmniConfig) -> OmniProtocolResult {
+        info!("[Discord] Starting up.");
         let token = config.get::<String>("discord_token").unwrap();
+        let (in_tx, in_rx) = channel::<OmniMessage>(10);
+        let (out_tx, out_rx) = channel::<OmniMessage>(10);
 
-        let (in_tx, in_rx) = channel(10);
-        let (out_tx, out_rx) = channel(10);
-
+        info!("[Discord] Configured, spawning threads.");
         let handle = thread::spawn(move || {
+            info!("[Discord] Sender thread spawned.");
             let handle = thread::spawn(move || {
-                let mut client = Client::new(&token, Handler { tx: out_tx })
-                    .expect("[Discord] Failed to create client!");
-                if let Err(e) = client.start() {
-                    error!("[Discord] Client error: {:?}", e);
-                }
-            });
-
-            for message in in_rx.wait() {
-                info!("[Discord] Received message: {:?}", message);
-                if let Ok(_msg) = message {
-                    let msg = _msg as OmniMessage;
-                    if let Err(e) = msg.channel.discord.say(format!("`{}`", msg.text)) {
-                        error!("[Discord] Failed to say: {}", e);
+                info!("[Discord] Receiver thread spawned.");
+                for message in in_rx.wait() {
+                    info!("[Discord] Received message: {:?}", message);
+                    if let Ok(msg) = message {
+                        if let Err(e) = msg.channel.discord.say(format!("`{}`", msg.text)) {
+                            error!("[Discord] Failed to say: {}", e);
+                        }
                     }
                 }
+                info!("[Discord] Receiver thread done.");
+            });
+
+            match Client::new(&token, Handler { tx: out_tx }) {
+                Ok(mut client) => if let Err(e) = client.start() {
+                    error!("[Discord] Client error: {}", e);
+                },
+                Err(e) => error!("[Discord] Failed to create client: {}", e),
             }
-
-            handle.join();
+            info!("[Discord] Sender thread done, joining.");
+            handle.join().unwrap();
+            info!("[Discord] Threads joined.");
         });
-
+        info!("[Discord] Threads spawned.");
         Ok(("discord", in_tx, out_rx, handle))
     }
 }

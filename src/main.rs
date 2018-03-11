@@ -5,21 +5,28 @@ extern crate futures;
 extern crate log;
 extern crate simplelog;
 
+use futures::{Future, Sink, Stream};
+use futures::sync::mpsc::{Receiver, Sender};
 use simplelog::TermLogger;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread;
+use std::thread::JoinHandle;
 
 mod commands;
 mod protocol;
 
-use protocol::*;
+use protocol::serenity::model::id::ChannelId as TEMP;
 use protocol::discord;
 use protocol::irc;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OmniChannel {
-    discord: protocol::serenity::model::id::ChannelId,
+    discord: TEMP,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct OmniMessage {
     channel: OmniChannel,
     text: String,
@@ -39,14 +46,68 @@ pub trait OmniProtocol {
     fn new(config: config::Config) -> OmniProtocolResult;
 }
 
+struct ProtocolLinker {
+    p_map_ref: Arc<Mutex<HashMap<&'static str, Sender<OmniMessage>>>>,
+    p_handles: Vec<JoinHandle<()>>,
+}
+
+impl ProtocolLinker {
+    fn new() -> Self {
+        ProtocolLinker {
+            p_map_ref: Arc::new(Mutex::new(HashMap::new())),
+            p_handles: Vec::new(),
+        }
+    }
+
+    fn spawn_relay_thread(&mut self, args: OmniProtocolResult) -> &mut Self {
+        let (p_str, p_in, p_out, p_handle) = args.unwrap();
+        {
+            let mut locked = self.p_map_ref.lock().unwrap();
+            locked.insert(p_str, p_in);
+        }
+        let p_map_ref_clone = self.p_map_ref.clone();
+        self.p_handles.push(thread::spawn(move || {
+            for message in p_out.wait() {
+                if let Ok(msg) = message {
+                    let p_map = { p_map_ref_clone.lock().unwrap().clone() };
+                    for (k, v) in p_map {
+                        if k != p_str {
+                            info!(
+                                "[LINKER] Relaying from {} to {}: {:?}",
+                                p_str,
+                                k,
+                                msg.clone()
+                            );
+                            if let Err(e) = v.send(msg.clone()).wait() {
+                                error!("[LINKER] Failed to relay: {}", e);
+                            }
+                        }
+                    }
+                }
+            }
+            p_handle.join().unwrap();
+        }));
+        self
+    }
+
+    fn join_all(&mut self) {
+        loop {
+            match self.p_handles.pop() {
+                Some(handle) => handle.join().unwrap(),
+                None => break,
+            };
+        }
+    }
+}
+
 fn main() {
     TermLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default()).unwrap();
     let mut config = config::Config::default();
     config.merge(config::File::with_name("config")).unwrap();
 
-    let (dis, dis_in, dis_out, dis_handle) = discord::Discord::new(config.clone()).unwrap();
-    let (irc, irc_in, irc_out, irc_handle) = irc::Irc::new(config.clone()).unwrap();
-
-    dis_handle.join();
-    irc_handle.join();
+    let mut p_linker = ProtocolLinker::new();
+    p_linker
+        .spawn_relay_thread(discord::Discord::new(config.clone()))
+        .spawn_relay_thread(irc::Irc::new(config.clone()))
+        .join_all();
 }

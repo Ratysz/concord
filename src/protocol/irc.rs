@@ -36,7 +36,7 @@ impl OmniProtocol for Irc {
                 Ok(())
             }));
             reactor.register_client_with_handler(client, move |_client, msg| {
-                info!("[IRC] Sent message: {:?}", msg.clone());
+                info!("[IRC] Sending message: {:?}", msg.clone());
                 if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
                     error!("[IRC] Failed to transmit: {}", e);
                 }

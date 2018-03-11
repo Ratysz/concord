@@ -1,6 +1,7 @@
 use protocol::*;
 use protocol::serenity::prelude::*;
 use protocol::serenity::model::prelude::*;
+use std::sync::Mutex;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
@@ -17,14 +18,31 @@ pub struct Discord;
 
 struct Handler {
     tx: Sender<OmniMessage>,
+    bot_user_id: Mutex<Option<serenity::model::id::UserId>>,
+    // Has to be Mutex<Option<T>>: needs interior mutability, is threaded, and unknown at init.
 }
 
-// TODO: re-implement self-consciousness.
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
-        info!("[Discord] Sent message: {:?}", msg);
-        if let Err(e) = self.tx.clone().send(OmniMessage::from(msg.clone())).wait() {
-            error!("[Discord] Failed to transmit: {}", e);
+        let bot_id = {
+            let ref mut locked = *self.bot_user_id.lock().unwrap();
+            match *locked {
+                Some(id) => id.clone(),
+                None => {
+                    // (Useless?) recovery attempt.
+                    // There should be no overhead, if it's never called.
+                    let id = serenity::http::get_current_user().unwrap().id;
+                    *locked = Some(id.clone());
+                    id
+                }
+            }
+            // This is where MutexGuard should be dropped, unlocking the Mutex.
+        };
+        if msg.author.id != bot_id {
+            info!("[Discord] Sending message: {:?}", msg);
+            if let Err(e) = self.tx.clone().send(OmniMessage::from(msg.clone())).wait() {
+                error!("[Discord] Failed to transmit: {}", e);
+            }
         }
     }
 
@@ -33,6 +51,8 @@ impl EventHandler for Handler {
             "[Discord] Connected as {}({}).",
             ready.user.name, ready.user.id
         );
+        let ref mut ref_bot_user_id = *self.bot_user_id.lock().unwrap();
+        *ref_bot_user_id = Some(ready.user.id);
     }
 }
 
@@ -59,7 +79,13 @@ impl OmniProtocol for Discord {
                 info!("[Discord] Receiver thread done.");
             });
 
-            match Client::new(&token, Handler { tx: out_tx }) {
+            match Client::new(
+                &token,
+                Handler {
+                    tx: out_tx,
+                    bot_user_id: Mutex::new(None), // No nulls - no problems.
+                },
+            ) {
                 Ok(mut client) => if let Err(e) = client.start() {
                     error!("[Discord] Client error: {}", e);
                 },
@@ -69,6 +95,7 @@ impl OmniProtocol for Discord {
             handle.join().unwrap();
             info!("[Discord] Threads joined.");
         });
+
         info!("[Discord] Threads spawned.");
         Ok(("discord", in_tx, out_rx, handle))
     }

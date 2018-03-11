@@ -7,6 +7,7 @@ impl From<Message> for OmniMessage {
         OmniMessage {
             channel: OmniChannel {
                 discord: ChannelId::from(409314585137512450 as u64),
+                irc: "#ratys-bot-test".to_string(),
             },
             text: format!("{:?}", msg),
         }
@@ -24,21 +25,27 @@ impl OmniProtocol for Irc {
             ..Config::default()
         };
 
-        let (in_tx, in_rx) = channel(10);
-        let (out_tx, out_rx) = channel(10);
+        let (in_tx, in_rx) = channel::<OmniMessage>(100);
+        let (out_tx, out_rx) = channel::<OmniMessage>(100);
 
         let handle = thread::spawn(move || {
             let mut reactor = IrcReactor::new().unwrap();
             let client = reactor.prepare_client_and_connect(&irc_config).unwrap();
             client.identify().unwrap();
+            let client_clone = client.clone();
             reactor.inner_handle().spawn(in_rx.for_each(move |msg| {
                 info!("[IRC] Received message: {:?}", msg);
+                client_clone
+                    .send_privmsg(&msg.channel.irc, &msg.text)
+                    .unwrap();
                 Ok(())
             }));
-            reactor.register_client_with_handler(client, move |_client, msg| {
+            reactor.register_client_with_handler(client, move |client, msg| {
                 info!("[IRC] Sending message: {:?}", msg.clone());
-                if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
-                    error!("[IRC] Failed to transmit: {}", e);
+                if msg.source_nickname() != Some(client.current_nickname()) {
+                    if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
+                        error!("[IRC] Failed to transmit: {}", e);
+                    }
                 }
                 Ok(())
             });

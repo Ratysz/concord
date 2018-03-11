@@ -4,6 +4,7 @@ extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate simplelog;
+extern crate systray;
 
 use futures::{Future, Sink, Stream};
 use futures::sync::mpsc::{Receiver, Sender};
@@ -24,6 +25,7 @@ use protocol::irc;
 #[derive(Clone, Debug)]
 pub struct OmniChannel {
     discord: TEMP,
+    irc: String,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +106,30 @@ fn main() {
     TermLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default()).unwrap();
     let mut config = config::Config::default();
     config.merge(config::File::with_name("config")).unwrap();
+
+    /*match systray::Application::new() {
+        Ok(mut app) => {
+            //app.set_icon_from_file(&"/usr/share/gxkb/flags/ua.png".to_string()).ok();
+            app.add_menu_item(&"Print a thing".to_string(), |_| {
+                println!("Printing a thing!");
+            }).ok();
+            app.add_menu_item(&"Add Menu Item".to_string(), |window| {
+                window
+                    .add_menu_item(&"Interior item".to_string(), |_| {
+                        println!("what");
+                    })
+                    .ok();
+                window.add_menu_separator().ok();
+            }).ok();
+            app.add_menu_separator().ok();
+            app.add_menu_item(&"Quit".to_string(), |window| {
+                window.quit();
+            }).ok();
+            println!("Waiting on message!");
+            app.wait_for_message();
+        }
+        Err(e) => error!("[APP] Couldn't create systray app: {}", e),
+    }*/
 
     let mut p_linker = ProtocolLinker::new();
     p_linker

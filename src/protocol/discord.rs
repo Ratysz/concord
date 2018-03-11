@@ -8,6 +8,7 @@ impl From<Message> for OmniMessage {
         OmniMessage {
             channel: OmniChannel {
                 discord: msg.channel_id,
+                irc: "#ratys-bot-test".to_string(),
             },
             text: msg.content,
         }
@@ -39,8 +40,8 @@ impl EventHandler for Handler {
             // This is where MutexGuard should be dropped, unlocking the Mutex.
         };
         if msg.author.id != bot_id {
-            info!("[Discord] Sending message: {:?}", msg);
-            if let Err(e) = self.tx.clone().send(OmniMessage::from(msg.clone())).wait() {
+            info!("[Discord] Sending message: {:?}", msg.clone());
+            if let Err(e) = self.tx.clone().send(OmniMessage::from(msg)).wait() {
                 error!("[Discord] Failed to transmit: {}", e);
             }
         }
@@ -60,8 +61,8 @@ impl OmniProtocol for Discord {
     fn new(config: OmniConfig) -> OmniProtocolResult {
         info!("[Discord] Starting up.");
         let token = config.get::<String>("discord_token").unwrap();
-        let (in_tx, in_rx) = channel::<OmniMessage>(10);
-        let (out_tx, out_rx) = channel::<OmniMessage>(10);
+        let (in_tx, in_rx) = channel::<OmniMessage>(100);
+        let (out_tx, out_rx) = channel::<OmniMessage>(100);
 
         info!("[Discord] Configured, spawning threads.");
         let handle = thread::spawn(move || {

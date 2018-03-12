@@ -18,25 +18,21 @@ use std::thread::JoinHandle;
 mod commands;
 mod protocol;
 
-use protocol::serenity::model::id::ChannelId as TEMP;
 use protocol::discord;
 use protocol::irc;
 
-#[derive(Clone, Debug)]
-pub struct OmniChannel {
-    discord: TEMP,
-    irc: String,
-}
+pub type ProtocolTag = &'static str;
+pub type ChannelTag = &'static str;
 
 #[derive(Clone, Debug)]
 pub struct OmniMessage {
-    channel: OmniChannel,
+    channel: ChannelTag,
     text: String,
 }
 
 pub type OmniProtocolResult = Result<
     (
-        &'static str,
+        ProtocolTag,
         Sender<OmniMessage>,
         Receiver<OmniMessage>,
         JoinHandle<()>,
@@ -45,43 +41,79 @@ pub type OmniProtocolResult = Result<
 >;
 
 pub trait OmniProtocol {
-    fn new(config: config::Config) -> OmniProtocolResult;
+    fn new(config: &config::Config) -> OmniProtocolResult;
 }
 
 struct ProtocolLinker {
-    p_map_ref: Arc<Mutex<HashMap<&'static str, Sender<OmniMessage>>>>,
+    p_map_ref: Arc<Mutex<HashMap<ProtocolTag, Sender<OmniMessage>>>>,
     p_handles: Vec<JoinHandle<()>>,
+    ch_map_ref: Arc<Vec<HashMap<ProtocolTag, ChannelTag>>>,
 }
 
 impl ProtocolLinker {
-    fn new() -> Self {
+    fn new(config: &config::Config) -> Self {
+        let mut ch_map = Vec::new();
+        ch_map.push({
+            let mut map = HashMap::new();
+            map.insert("discord", "409314585137512450");
+            map.insert("irc", "#ratys-bot-test");
+            map
+        });
+        let ch_map_ref = Arc::new(ch_map);
         ProtocolLinker {
             p_map_ref: Arc::new(Mutex::new(HashMap::new())),
             p_handles: Vec::new(),
+            ch_map_ref,
         }
     }
 
-    fn spawn_relay_thread(&mut self, args: OmniProtocolResult) -> &mut Self {
-        let (p_str, p_in, p_out, p_handle) = args.unwrap();
+    fn map_channel(
+        ch_map_ref: &Arc<Vec<HashMap<ProtocolTag, ChannelTag>>>,
+        source_channel: &ChannelTag,
+        dest_protocol: &ProtocolTag,
+    ) -> Vec<ChannelTag> {
+        let mut ch_list = Vec::<ChannelTag>::new();
+        for map in ch_map_ref.iter() {
+            for s_channel in map.values().collect::<Vec<&ChannelTag>>() {
+                if s_channel == source_channel {
+                    for (protocol, d_channel) in map {
+                        if protocol == dest_protocol {
+                            ch_list.push(d_channel);
+                        }
+                    }
+                }
+            }
+        }
+        ch_list
+    }
+
+    fn spawn_relay_thread(&mut self, result: OmniProtocolResult) -> &mut Self {
+        let (p_str, p_in, p_out, p_handle) = result.unwrap();
         {
             let mut locked = self.p_map_ref.lock().unwrap();
             locked.insert(p_str, p_in);
         }
         let p_map_ref_clone = self.p_map_ref.clone();
+        let ch_map_ref_clone = self.ch_map_ref.clone();
         self.p_handles.push(thread::spawn(move || {
             for message in p_out.wait() {
-                if let Ok(msg) = message {
+                if let Ok(mut msg) = message {
                     let p_map = { p_map_ref_clone.lock().unwrap().clone() };
-                    for (k, v) in p_map {
-                        if k != p_str {
-                            info!(
-                                "[LINKER] Relaying from {} to {}: {:?}",
-                                p_str,
-                                k,
-                                msg.clone()
-                            );
-                            if let Err(e) = v.send(msg.clone()).wait() {
-                                error!("[LINKER] Failed to relay: {}", e);
+                    for (protocol, p_input) in p_map {
+                        for ch in
+                            ProtocolLinker::map_channel(&ch_map_ref_clone, &msg.channel, &protocol)
+                        {
+                            if !(protocol == p_str && msg.channel == ch) {
+                                info!(
+                                    "[LINKER] Relaying from {} to {}: {:?}",
+                                    p_str,
+                                    protocol,
+                                    msg.clone()
+                                );
+                                msg.channel = ch;
+                                if let Err(e) = p_input.clone().send(msg.clone()).wait() {
+                                    error!("[LINKER] Failed to relay: {}", e);
+                                }
                             }
                         }
                     }
@@ -131,9 +163,9 @@ fn main() {
         Err(e) => error!("[APP] Couldn't create systray app: {}", e),
     }*/
 
-    let mut p_linker = ProtocolLinker::new();
+    let mut p_linker = ProtocolLinker::new(&config);
     p_linker
-        .spawn_relay_thread(discord::Discord::new(config.clone()))
-        .spawn_relay_thread(irc::Irc::new(config.clone()))
+        .spawn_relay_thread(discord::Discord::new(&config))
+        .spawn_relay_thread(irc::Irc::new(&config))
         .join_all();
 }

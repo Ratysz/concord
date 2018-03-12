@@ -6,16 +6,14 @@ use std::sync::Mutex;
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
         OmniMessage {
-            channel: OmniChannel {
-                discord: msg.channel_id,
-                irc: "#ratys-bot-test".to_string(),
-            },
+            channel: "409314585137512450",
             text: msg.content,
         }
     }
 }
 
 pub struct Discord;
+const PROTOCOL_TAG: ProtocolTag = "discord";
 
 struct Handler {
     tx: Sender<OmniMessage>,
@@ -58,7 +56,7 @@ impl EventHandler for Handler {
 }
 
 impl OmniProtocol for Discord {
-    fn new(config: OmniConfig) -> OmniProtocolResult {
+    fn new(config: &OmniConfig) -> OmniProtocolResult {
         info!("[Discord] Starting up.");
         let token = config.get::<String>("discord_token").unwrap();
         let (in_tx, in_rx) = channel::<OmniMessage>(100);
@@ -67,12 +65,15 @@ impl OmniProtocol for Discord {
         info!("[Discord] Configured, spawning threads.");
         let handle = thread::spawn(move || {
             info!("[Discord] Sender thread spawned.");
+
             let handle = thread::spawn(move || {
                 info!("[Discord] Receiver thread spawned.");
                 for message in in_rx.wait() {
                     info!("[Discord] Received message: {:?}", message);
                     if let Ok(msg) = message {
-                        if let Err(e) = msg.channel.discord.say(format!("`{}`", msg.text)) {
+                        if let Err(e) = ChannelId::from(msg.channel.parse::<u64>().unwrap())
+                            .say(format!("`{}`", msg.text))
+                        {
                             error!("[Discord] Failed to say: {}", e);
                         }
                     }
@@ -93,11 +94,13 @@ impl OmniProtocol for Discord {
                 Err(e) => error!("[Discord] Failed to create client: {}", e),
             }
             info!("[Discord] Sender thread done, joining.");
+
             handle.join().unwrap();
             info!("[Discord] Threads joined.");
         });
 
         info!("[Discord] Threads spawned.");
-        Ok(("discord", in_tx, out_rx, handle))
+
+        Ok((PROTOCOL_TAG, in_tx, out_rx, handle))
     }
 }

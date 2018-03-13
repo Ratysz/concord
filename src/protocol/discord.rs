@@ -1,106 +1,92 @@
 use protocol::*;
 use protocol::serenity::prelude::*;
 use protocol::serenity::model::prelude::*;
-use std::sync::Mutex;
+use std::sync::RwLock;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
         OmniMessage {
-            channel: "409314585137512450",
+            channel: "409314585137512450".to_string(),
             text: msg.content,
         }
     }
 }
 
 pub struct Discord;
-const PROTOCOL_TAG: ProtocolTag = "discord";
 
 struct Handler {
     tx: Sender<OmniMessage>,
-    bot_user_id: Mutex<Option<serenity::model::id::UserId>>,
-    // Has to be Mutex<Option<T>>: needs interior mutability, is threaded, and unknown at init.
+    bot_user_id: RwLock<Option<serenity::model::id::UserId>>,
+    // Needs interior mutability, is threaded, and unknown at init.
 }
 
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
-        let bot_id = {
-            let ref mut locked = *self.bot_user_id.lock().unwrap();
-            match *locked {
-                Some(id) => id.clone(),
-                None => {
-                    // (Useless?) recovery attempt.
-                    // There should be no overhead, if it's never called.
-                    let id = serenity::http::get_current_user().unwrap().id;
-                    *locked = Some(id.clone());
-                    id
+        if let Some(bot_id) = *self.bot_user_id.read().unwrap() {
+            if msg.author.id != bot_id {
+                debug!("Sending message: {:?}", &msg);
+                if let Err(e) = self.tx.clone().send(OmniMessage::from(msg)).wait() {
+                    error!("Failed to transmit: {}", e);
                 }
-            }
-            // This is where MutexGuard should be dropped, unlocking the Mutex.
-        };
-        if msg.author.id != bot_id {
-            info!("[Discord] Sending message: {:?}", msg.clone());
-            if let Err(e) = self.tx.clone().send(OmniMessage::from(msg)).wait() {
-                error!("[Discord] Failed to transmit: {}", e);
             }
         }
     }
 
     fn ready(&self, _: Context, ready: Ready) {
         info!(
-            "[Discord] Connected as {}({}).",
+            "Discord connected as {}({}).",
             ready.user.name, ready.user.id
         );
-        let ref mut ref_bot_user_id = *self.bot_user_id.lock().unwrap();
+        let ref mut ref_bot_user_id = *self.bot_user_id.write().unwrap();
         *ref_bot_user_id = Some(ready.user.id);
     }
 }
 
 impl OmniProtocol for Discord {
     fn new(config: &OmniConfig) -> OmniProtocolResult {
-        info!("[Discord] Starting up.");
+        debug!("Starting up.");
         let token = config.get::<String>("discord_token").unwrap();
         let (in_tx, in_rx) = channel::<OmniMessage>(100);
         let (out_tx, out_rx) = channel::<OmniMessage>(100);
 
-        info!("[Discord] Configured, spawning threads.");
+        debug!("Configured, spawning threads.");
         let handle = thread::spawn(move || {
-            info!("[Discord] Sender thread spawned.");
+            debug!("Sender thread spawned.");
 
             let handle = thread::spawn(move || {
-                info!("[Discord] Receiver thread spawned.");
+                debug!("Receiver thread spawned.");
                 for message in in_rx.wait() {
-                    info!("[Discord] Received message: {:?}", message);
+                    debug!("Received message: {:?}", message);
                     if let Ok(msg) = message {
                         if let Err(e) = ChannelId::from(msg.channel.parse::<u64>().unwrap())
                             .say(format!("`{}`", msg.text))
                         {
-                            error!("[Discord] Failed to say: {}", e);
+                            error!("Failed to say: {}", e);
                         }
                     }
                 }
-                info!("[Discord] Receiver thread done.");
+                debug!("Receiver thread done.");
             });
 
             match Client::new(
                 &token,
                 Handler {
                     tx: out_tx,
-                    bot_user_id: Mutex::new(None), // No nulls - no problems.
+                    bot_user_id: RwLock::new(None), // No nulls - no problems.
                 },
             ) {
                 Ok(mut client) => if let Err(e) = client.start() {
-                    error!("[Discord] Client error: {}", e);
+                    error!("Client error: {}", e);
                 },
-                Err(e) => error!("[Discord] Failed to create client: {}", e),
+                Err(e) => error!("Failed to create client: {}", e),
             }
-            info!("[Discord] Sender thread done, joining.");
+            debug!("Sender thread done, joining.");
 
             handle.join().unwrap();
-            info!("[Discord] Threads joined.");
+            debug!("Threads joined.");
         });
+        debug!("Threads spawned.");
 
-        info!("[Discord] Threads spawned.");
-
-        Ok((PROTOCOL_TAG, in_tx, out_rx, handle))
+        Ok(("discord".to_string(), in_tx, out_rx, handle))
     }
 }

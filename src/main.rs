@@ -5,13 +5,15 @@ extern crate futures;
 extern crate log;
 extern crate simplelog;
 extern crate systray;
+#[macro_use]
+extern crate text_io;
 
 use futures::{Future, Sink, Stream};
 use futures::sync::mpsc::{Receiver, Sender};
 use simplelog::TermLogger;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::RwLock;
 use std::thread;
 use std::thread::JoinHandle;
 
@@ -20,9 +22,10 @@ mod protocol;
 
 use protocol::discord;
 use protocol::irc;
+use protocol::terminal;
 
-pub type ProtocolTag = &'static str;
-pub type ChannelTag = &'static str;
+pub type ProtocolTag = String; //&'static str;
+pub type ChannelTag = String; //&'static str;
 
 #[derive(Clone, Debug)]
 pub struct OmniMessage {
@@ -37,83 +40,93 @@ pub type OmniProtocolResult = Result<
         Receiver<OmniMessage>,
         JoinHandle<()>,
     ),
-    &'static str,
+    String,
 >;
 
 pub trait OmniProtocol {
     fn new(config: &config::Config) -> OmniProtocolResult;
 }
 
+#[derive(Debug)]
 struct ProtocolLinker {
-    p_map_ref: Arc<Mutex<HashMap<ProtocolTag, Sender<OmniMessage>>>>,
+    p_map_ref: Arc<RwLock<HashMap<ProtocolTag, Sender<OmniMessage>>>>,
     p_handles: Vec<JoinHandle<()>>,
-    ch_map_ref: Arc<Vec<HashMap<ProtocolTag, ChannelTag>>>,
+    ch_map_ref: Arc<Vec<HashMap<ProtocolTag, Vec<ChannelTag>>>>,
 }
 
 impl ProtocolLinker {
     fn new(config: &config::Config) -> Self {
-        let mut ch_map = Vec::new();
-        ch_map.push({
-            let mut map = HashMap::new();
-            map.insert("discord", "409314585137512450");
-            map.insert("irc", "#ratys-bot-test");
-            map
-        });
-        let ch_map_ref = Arc::new(ch_map);
+        let ch_map = config
+            .get::<Vec<HashMap<ChannelTag, Vec<ChannelTag>>>>("channel")
+            .unwrap();
         ProtocolLinker {
-            p_map_ref: Arc::new(Mutex::new(HashMap::new())),
+            p_map_ref: Arc::new(RwLock::new(HashMap::new())),
             p_handles: Vec::new(),
-            ch_map_ref,
+            ch_map_ref: Arc::new(ch_map),
         }
     }
 
     fn map_channel(
-        ch_map_ref: &Arc<Vec<HashMap<ProtocolTag, ChannelTag>>>,
+        ch_map_ref: &Arc<Vec<HashMap<ProtocolTag, Vec<ChannelTag>>>>,
+        source_protocol: &ProtocolTag,
         source_channel: &ChannelTag,
-        dest_protocol: &ProtocolTag,
-    ) -> Vec<ChannelTag> {
-        let mut ch_list = Vec::<ChannelTag>::new();
-        for map in ch_map_ref.iter() {
-            for s_channel in map.values().collect::<Vec<&ChannelTag>>() {
-                if s_channel == source_channel {
-                    for (protocol, d_channel) in map {
-                        if protocol == dest_protocol {
-                            ch_list.push(d_channel);
+    ) -> Vec<(ProtocolTag, ChannelTag)> {
+        debug!(
+            "+> Mapping channels for {}-{}",
+            &source_protocol, &source_channel
+        );
+        let mut mapped = Vec::<(ProtocolTag, ChannelTag)>::new();
+        for p_ch_map in ch_map_ref.iter() {
+            let mut should_map = false;
+            'outer: for (protocol, ch_vec) in p_ch_map {
+                if protocol == source_protocol {
+                    for channel in ch_vec {
+                        if channel == source_channel {
+                            should_map = true;
+                            debug!("| - adding from {:?}", &p_ch_map);
+                            break 'outer;
+                        }
+                    }
+                }
+            }
+            if should_map {
+                for (protocol, ch_vec) in p_ch_map {
+                    for channel in ch_vec {
+                        if !(protocol == source_protocol && channel == source_channel) {
+                            mapped.push((protocol.clone(), channel.clone()));
                         }
                     }
                 }
             }
         }
-        ch_list
+        debug!("+> Recipients: {:?}", &mapped);
+        mapped
     }
 
     fn spawn_relay_thread(&mut self, result: OmniProtocolResult) -> &mut Self {
         let (p_str, p_in, p_out, p_handle) = result.unwrap();
         {
-            let mut locked = self.p_map_ref.lock().unwrap();
-            locked.insert(p_str, p_in);
+            let mut locked = self.p_map_ref.write().unwrap();
+            locked.insert(p_str.clone(), p_in);
         }
         let p_map_ref_clone = self.p_map_ref.clone();
         let ch_map_ref_clone = self.ch_map_ref.clone();
         self.p_handles.push(thread::spawn(move || {
             for message in p_out.wait() {
-                if let Ok(mut msg) = message {
-                    let p_map = { p_map_ref_clone.lock().unwrap().clone() };
-                    for (protocol, p_input) in p_map {
-                        for ch in
-                            ProtocolLinker::map_channel(&ch_map_ref_clone, &msg.channel, &protocol)
-                        {
-                            if !(protocol == p_str && msg.channel == ch) {
-                                info!(
-                                    "[LINKER] Relaying from {} to {}: {:?}",
-                                    p_str,
-                                    protocol,
-                                    msg.clone()
-                                );
-                                msg.channel = ch;
-                                if let Err(e) = p_input.clone().send(msg.clone()).wait() {
-                                    error!("[LINKER] Failed to relay: {}", e);
-                                }
+                if let Ok(msg) = message {
+                    let p_map = p_map_ref_clone.read().unwrap();
+                    for (protocol, channel) in
+                        ProtocolLinker::map_channel(&ch_map_ref_clone, &p_str, &msg.channel)
+                    {
+                        if let Some(p_in) = p_map.get(&protocol) {
+                            debug!(
+                                "Relaying from {}-{} to {}-{}: {:?}",
+                                &p_str, &msg.channel, &protocol, &channel, &msg,
+                            );
+                            let mut t_msg = msg.clone();
+                            t_msg.channel = channel;
+                            if let Err(e) = p_in.clone().send(t_msg).wait() {
+                                error!("Failed to transmit: {}", e);
                             }
                         }
                     }
@@ -135,7 +148,7 @@ impl ProtocolLinker {
 }
 
 fn main() {
-    TermLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default()).unwrap();
+    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
     let mut config = config::Config::default();
     config.merge(config::File::with_name("config")).unwrap();
 
@@ -167,5 +180,28 @@ fn main() {
     p_linker
         .spawn_relay_thread(discord::Discord::new(&config))
         .spawn_relay_thread(irc::Irc::new(&config))
+        .spawn_relay_thread(terminal::Terminal::new(&config))
+        .join_all();
+}
+
+#[test]
+fn config() {
+    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
+    let mut config = config::Config::default();
+    config.merge(config::File::with_name("config")).unwrap();
+
+    let mut p_linker = ProtocolLinker::new(&config);
+    debug!("Linker dump: {:?}", p_linker);
+}
+
+#[test]
+fn basic_relaying() {
+    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
+    let mut config = config::Config::default();
+    config.merge(config::File::with_name("config")).unwrap();
+
+    let mut p_linker = ProtocolLinker::new(&config);
+    p_linker
+        .spawn_relay_thread(terminal::Terminal::new(&config))
         .join_all();
 }

@@ -6,7 +6,7 @@ use std::sync::RwLock;
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
         OmniMessage {
-            channel: "409314585137512450".to_string(),
+            channel: msg.channel_id.to_string(),
             text: msg.content,
         }
     }
@@ -26,7 +26,7 @@ impl EventHandler for Handler {
             if msg.author.id != bot_id {
                 debug!("Sending message: {:?}", &msg);
                 if let Err(e) = self.tx.clone().send(OmniMessage::from(msg)).wait() {
-                    error!("Failed to transmit: {}", e);
+                    error!("Discord failed to transmit: {}", e);
                 }
             }
         }
@@ -61,7 +61,7 @@ impl OmniProtocol for Discord {
                         if let Err(e) = ChannelId::from(msg.channel.parse::<u64>().unwrap())
                             .say(format!("`{}`", msg.text))
                         {
-                            error!("Failed to say: {}", e);
+                            error!("Discord failed to say: {}", e);
                         }
                     }
                 }
@@ -76,9 +76,9 @@ impl OmniProtocol for Discord {
                 },
             ) {
                 Ok(mut client) => if let Err(e) = client.start() {
-                    error!("Client error: {}", e);
+                    error!("Discord client error: {}", e);
                 },
-                Err(e) => error!("Failed to create client: {}", e),
+                Err(e) => error!("Discord failed to create client: {}", e),
             }
             debug!("Sender thread done, joining.");
 

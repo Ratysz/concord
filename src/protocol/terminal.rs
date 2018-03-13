@@ -46,7 +46,7 @@ impl OmniProtocol for Terminal {
                 let line: String = read!("{}\n");
                 debug!("Sending message: {:?}", &line);
                 if let Err(e) = out_tx.clone().send(OmniMessage::from(line)).wait() {
-                    error!("Failed to transmit: {}", e);
+                    error!("Terminal failed to transmit: {}", e);
                 }
             }
             debug!("Sender thread done, joining.");

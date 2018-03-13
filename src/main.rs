@@ -112,6 +112,7 @@ impl ProtocolLinker {
         let p_map_ref_clone = self.p_map_ref.clone();
         let ch_map_ref_clone = self.ch_map_ref.clone();
         self.p_handles.push(thread::spawn(move || {
+            thread::sleep_ms(1000);
             for message in p_out.wait() {
                 if let Ok(msg) = message {
                     let p_map = p_map_ref_clone.read().unwrap();
@@ -126,7 +127,10 @@ impl ProtocolLinker {
                             let mut t_msg = msg.clone();
                             t_msg.channel = channel;
                             if let Err(e) = p_in.clone().send(t_msg).wait() {
-                                error!("Failed to transmit: {}", e);
+                                error!(
+                                    "Linker failed to transmit from {} to {}: {}",
+                                    &p_str, &protocol, e
+                                );
                             }
                         }
                     }
@@ -148,7 +152,7 @@ impl ProtocolLinker {
 }
 
 fn main() {
-    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
+    TermLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default()).unwrap();
     let mut config = config::Config::default();
     config.merge(config::File::with_name("config")).unwrap();
 

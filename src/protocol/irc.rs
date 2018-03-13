@@ -3,10 +3,23 @@ use protocol::irc_crate::client::prelude::*;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {
-        OmniMessage {
-            channel: "#ratys-bot-test".to_string(),
-            text: format!("{:?}", msg),
-        }
+        let (channel, text) = match msg.command.clone() {
+            Command::PRIVMSG(chan, cont) => (
+                chan,
+                format!(
+                    "{}: {}",
+                    {
+                        match msg.prefix {
+                            Some(prefix) => prefix,
+                            None => "NONE".to_string(),
+                        }
+                    },
+                    cont
+                ),
+            ),
+            _ => ("debug".to_string(), format!("{:?}", msg)),
+        };
+        OmniMessage { channel, text }
     }
 }
 
@@ -37,20 +50,8 @@ impl OmniProtocol for Irc {
             reactor.register_client_with_handler(client, move |client, msg| {
                 debug!("Sending message: {:?}", msg.clone());
                 if msg.source_nickname() != Some(client.current_nickname()) {
-                    match msg.command.clone() {
-                        Command::PING(_, _) => (),
-                        Command::PONG(_, _) => (),
-                        Command::Response(_, _, _) => (),
-                        /*Command::PRIVMSG(chan, cont) => {
-                            if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
-                                error!("[IRC] Failed to transmit: {}", e);
-                            }
-                        }*/
-                        _ => {
-                            if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
-                                error!("Failed to transmit: {}", e);
-                            }
-                        }
+                    if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
+                        error!("IRC failed to transmit: {}", e);
                     }
                 }
                 Ok(())

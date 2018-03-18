@@ -1,6 +1,7 @@
 use protocol::*;
-use protocol::serenity::prelude::*;
-use protocol::serenity::model::prelude::*;
+use serenity;
+use serenity::prelude::*;
+use serenity::model::prelude::*;
 use std::sync::RwLock;
 
 impl From<Message> for OmniMessage {

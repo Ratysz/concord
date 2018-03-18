@@ -3,12 +3,26 @@ name = "concord-irc"
 version = "0.1.0"
 authors = ["Ratys <ratysz@gmail.com>"]
 
+[lib]
+name = "concord_core"
+path = "src/lib.rs"
+
+[[bin]]
+name = "concord_irc"
+path = "src/main.rs"
+required-features = ["discord_feature", "irc_feature", "terminal_feature"]
+
+[features]
+discord_feature = ["serenity"]
+irc_feature = ["irc"]
+terminal_feature = ["text_io"]
+
 [dependencies]
 config = "0.8"
 futures = "0.1"
-irc = "0.13"
+irc = { version = "0.13", optional = true }
 log = "0.4"
-serenity = "0.5"
+serenity = { version = "0.5", optional = true }
 simplelog = "0.5"
 systray = "0.2"
-text_io = "0.1"
+text_io = { version = "0.1", optional = true }

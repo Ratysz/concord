@@ -1,5 +1,5 @@
 use protocol::*;
-use protocol::irc_crate::client::prelude::*;
+use irc_crate::client::prelude::*;
 
 impl From<Message> for OmniMessage {
     fn from(msg: Message) -> Self {

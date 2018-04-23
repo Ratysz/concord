@@ -11,13 +11,16 @@ use simplelog::TermLogger;
 
 fn main() {
     TermLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default()).unwrap();
-    let mut config = config::Config::default();
-    config.merge(config::File::with_name("config")).unwrap();
+    let config = {
+        let mut config = config::Config::default();
+        config.merge(config::File::with_name("config")).unwrap();
+        config
+    };
 
-    /*match systray::Application::new() {
+    match systray::Application::new() {
         Ok(mut app) => {
             //app.set_icon_from_file(&"/usr/share/gxkb/flags/ua.png".to_string()).ok();
-            app.add_menu_item(&"Print a thing".to_string(), |_| {
+            /*app.add_menu_item(&"Print a thing".to_string(), |_| {
                 println!("Printing a thing!");
             }).ok();
             app.add_menu_item(&"Add Menu Item".to_string(), |window| {
@@ -28,42 +31,26 @@ fn main() {
                     .ok();
                 window.add_menu_separator().ok();
             }).ok();
-            app.add_menu_separator().ok();
+            app.add_menu_separator().ok();*/
             app.add_menu_item(&"Quit".to_string(), |window| {
                 window.quit();
             }).ok();
-            println!("Waiting on message!");
+            info!("SysTray initialized.");
             app.wait_for_message();
         }
         Err(e) => error!("[APP] Couldn't create systray app: {}", e),
-    }*/
+    }
 
     let mut p_linker = ProtocolLinker::new(&config);
-    p_linker
-        .spawn_relay_thread(Discord::new(&config))
-        .spawn_relay_thread(Irc::new(&config))
-        .spawn_relay_thread(Terminal::new(&config))
-        .join_all();
-}
 
-#[test]
-fn config() {
-    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
-    let mut config = config::Config::default();
-    config.merge(config::File::with_name("config")).unwrap();
+    #[cfg(feature = "discord_protocol")]
+    p_linker.spawn_relay_thread(Discord::new(&config));
 
-    let mut p_linker = ProtocolLinker::new(&config);
-    debug!("Linker dump: {:?}", p_linker);
-}
+    #[cfg(feature = "irc_protocol")]
+    p_linker.spawn_relay_thread(Irc::new(&config));
 
-#[test]
-fn basic_relaying() {
-    TermLogger::init(simplelog::LevelFilter::Debug, simplelog::Config::default()).unwrap();
-    let mut config = config::Config::default();
-    config.merge(config::File::with_name("config")).unwrap();
+    #[cfg(feature = "terminal_protocol")]
+    p_linker.spawn_relay_thread(Terminal::new(&config));
 
-    let mut p_linker = ProtocolLinker::new(&config);
-    p_linker
-        .spawn_relay_thread(terminal::Terminal::new(&config))
-        .join_all();
+    p_linker.join_all();
 }

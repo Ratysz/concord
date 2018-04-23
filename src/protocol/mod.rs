@@ -8,11 +8,11 @@ pub use std::thread;
 pub use std::thread::JoinHandle;
 use std::time::Duration;
 
-#[cfg(feature = "discord_feature")]
+#[cfg(feature = "discord_protocol")]
 pub mod discord;
-#[cfg(feature = "irc_feature")]
+#[cfg(feature = "irc_protocol")]
 pub mod irc;
-#[cfg(feature = "terminal_feature")]
+#[cfg(feature = "terminal_protocol")]
 pub mod terminal;
 
 pub type ProtocolTag = String;
@@ -139,5 +139,32 @@ impl ProtocolLinker {
                 None => break,
             };
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use config;
+    use protocol::*;
+    use protocol::terminal::Terminal;
+
+    #[test]
+    fn config() {
+        let mut config = config::Config::default();
+        config.merge(config::File::with_name("config")).unwrap();
+
+        let mut p_linker = ProtocolLinker::new(&config);
+        debug!("Linker dump: {:?}", p_linker);
+    }
+
+    #[test]
+    fn basic_relaying() {
+        let mut config = config::Config::default();
+        config.merge(config::File::with_name("config")).unwrap();
+
+        let mut p_linker = ProtocolLinker::new(&config);
+        p_linker
+            .spawn_relay_thread(Terminal::new(&config))
+            .join_all();
     }
 }

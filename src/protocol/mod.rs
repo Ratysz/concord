@@ -15,34 +15,33 @@ pub mod irc;
 #[cfg(feature = "terminal_protocol")]
 pub mod terminal;
 
-pub type ProtocolTag = String;
+pub type CCProtocolTag = String;
 pub type ChannelTag = String;
 
 #[derive(Clone, Debug)]
-pub struct OmniMessage {
+pub struct CCMessage {
     channel: ChannelTag,
     text: String,
 }
 
-pub type OmniProtocolResult = Result<
-    (
-        ProtocolTag,
-        Sender<OmniMessage>,
-        Receiver<OmniMessage>,
-        JoinHandle<()>,
-    ),
-    String,
->;
+pub type CCProtocolInitResult = Result<CCProtocolInitOk, &'static str>;
 
-pub trait OmniProtocol {
-    fn new(config: &OmniConfig) -> OmniProtocolResult;
+pub struct CCProtocolInitOk {
+    pub protocol_tag: CCProtocolTag,
+    pub sender: Sender<CCMessage>,
+    pub receiver: Receiver<CCMessage>,
+    pub join_handle: JoinHandle<()>,
+}
+
+pub trait CCProtocol {
+    fn new(config: &OmniConfig) -> CCProtocolInitResult;
 }
 
 #[derive(Debug)]
 pub struct ProtocolLinker {
-    p_map_ref: Arc<RwLock<HashMap<ProtocolTag, Sender<OmniMessage>>>>,
+    p_map_ref: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
     p_handles: Vec<JoinHandle<()>>,
-    ch_map_ref: Arc<Vec<HashMap<ProtocolTag, Vec<ChannelTag>>>>,
+    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<ChannelTag>>>>,
 }
 
 impl ProtocolLinker {
@@ -58,15 +57,15 @@ impl ProtocolLinker {
     }
 
     fn map_channel(
-        ch_map_ref: &Arc<Vec<HashMap<ProtocolTag, Vec<ChannelTag>>>>,
-        source_protocol: &ProtocolTag,
+        ch_map_ref: &Arc<Vec<HashMap<CCProtocolTag, Vec<ChannelTag>>>>,
+        source_protocol: &CCProtocolTag,
         source_channel: &ChannelTag,
-    ) -> Vec<(ProtocolTag, ChannelTag)> {
+    ) -> Vec<(CCProtocolTag, ChannelTag)> {
         debug!(
             "+> Mapping channels for {}-{}",
             &source_protocol, &source_channel
         );
-        let mut mapped = Vec::<(ProtocolTag, ChannelTag)>::new();
+        let mut mapped = Vec::<(CCProtocolTag, ChannelTag)>::new();
         for p_ch_map in ch_map_ref.iter() {
             let mut should_map = false;
             'outer: for (protocol, ch_vec) in p_ch_map {
@@ -94,40 +93,45 @@ impl ProtocolLinker {
         mapped
     }
 
-    pub fn spawn_relay_thread(&mut self, result: OmniProtocolResult) -> &mut Self {
-        let (p_str, p_in, p_out, p_handle) = result.unwrap();
+    pub fn spawn_relay_thread(&mut self, result: CCProtocolInitResult) -> &mut Self {
+        let CCProtocolInitOk {
+            protocol_tag,
+            sender,
+            receiver,
+            join_handle,
+        } = result.unwrap();
         {
             let mut locked = self.p_map_ref.write().unwrap();
-            locked.insert(p_str.clone(), p_in);
+            locked.insert(protocol_tag.clone(), sender);
         }
         let p_map_ref_clone = self.p_map_ref.clone();
         let ch_map_ref_clone = self.ch_map_ref.clone();
         self.p_handles.push(thread::spawn(move || {
             thread::sleep(Duration::from_millis(1000));
-            for message in p_out.wait() {
+            for message in receiver.wait() {
                 if let Ok(msg) = message {
                     let p_map = p_map_ref_clone.read().unwrap();
                     for (protocol, channel) in
-                        ProtocolLinker::map_channel(&ch_map_ref_clone, &p_str, &msg.channel)
+                        ProtocolLinker::map_channel(&ch_map_ref_clone, &protocol_tag, &msg.channel)
                     {
                         if let Some(p_in) = p_map.get(&protocol) {
                             debug!(
                                 "Relaying from {}-{} to {}-{}: {:?}",
-                                &p_str, &msg.channel, &protocol, &channel, &msg,
+                                &protocol_tag, &msg.channel, &protocol, &channel, &msg,
                             );
                             let mut t_msg = msg.clone();
                             t_msg.channel = channel;
                             if let Err(e) = p_in.clone().send(t_msg).wait() {
                                 error!(
                                     "Linker failed to transmit from {} to {}: {}",
-                                    &p_str, &protocol, e
+                                    &protocol_tag, &protocol, e
                                 );
                             }
                         }
                     }
                 }
             }
-            p_handle.join().unwrap();
+            join_handle.join().unwrap();
         }));
         self
     }

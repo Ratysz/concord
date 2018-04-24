@@ -1,5 +1,5 @@
 [package]
-name = "concord-irc"
+name = "concord"
 version = "0.1.0"
 authors = ["Ratys <ratysz@gmail.com>"]
 

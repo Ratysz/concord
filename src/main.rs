@@ -19,19 +19,7 @@ fn main() {
 
     match systray::Application::new() {
         Ok(mut app) => {
-            //app.set_icon_from_file(&"/usr/share/gxkb/flags/ua.png".to_string()).ok();
-            /*app.add_menu_item(&"Print a thing".to_string(), |_| {
-                println!("Printing a thing!");
-            }).ok();
-            app.add_menu_item(&"Add Menu Item".to_string(), |window| {
-                window
-                    .add_menu_item(&"Interior item".to_string(), |_| {
-                        println!("what");
-                    })
-                    .ok();
-                window.add_menu_separator().ok();
-            }).ok();
-            app.add_menu_separator().ok();*/
+            //app.set_icon_from_resource(&"/usr/share/gxkb/flags/ua.png".to_string()).ok();
             app.add_menu_item(&"Quit".to_string(), |window| {
                 window.quit();
             }).ok();

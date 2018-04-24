@@ -1,7 +1,7 @@
 use protocol::*;
 use irc_crate::client::prelude::*;
 
-impl From<Message> for OmniMessage {
+impl From<Message> for CCMessage {
     fn from(msg: Message) -> Self {
         let (channel, text) = match msg.command.clone() {
             Command::PRIVMSG(chan, cont) => (
@@ -19,14 +19,14 @@ impl From<Message> for OmniMessage {
             ),
             _ => ("debug".to_string(), format!("{:?}", msg)),
         };
-        OmniMessage { channel, text }
+        CCMessage { channel, text }
     }
 }
 
 pub struct Irc;
 
-impl OmniProtocol for Irc {
-    fn new(config: &OmniConfig) -> OmniProtocolResult {
+impl CCProtocol for Irc {
+    fn new(config: &OmniConfig) -> CCProtocolInitResult {
         let irc_config = Config {
             nickname: Some("the-irc-crate".to_owned()),
             server: Some("irc.mozilla.org".to_owned()),
@@ -34,8 +34,8 @@ impl OmniProtocol for Irc {
             ..Config::default()
         };
 
-        let (in_tx, in_rx) = channel::<OmniMessage>(100);
-        let (out_tx, out_rx) = channel::<OmniMessage>(100);
+        let (in_tx, in_rx) = channel::<CCMessage>(100);
+        let (out_tx, out_rx) = channel::<CCMessage>(100);
 
         let handle = thread::spawn(move || {
             let mut reactor = IrcReactor::new().unwrap();
@@ -50,7 +50,7 @@ impl OmniProtocol for Irc {
             reactor.register_client_with_handler(client, move |client, msg| {
                 debug!("Sending message: {:?}", msg.clone());
                 if msg.source_nickname() != Some(client.current_nickname()) {
-                    if let Err(e) = out_tx.clone().send(OmniMessage::from(msg)).wait() {
+                    if let Err(e) = out_tx.clone().send(CCMessage::from(msg)).wait() {
                         error!("IRC failed to transmit: {}", e);
                     }
                 }
@@ -59,6 +59,11 @@ impl OmniProtocol for Irc {
             reactor.run().unwrap();
         });
 
-        Ok(("irc".to_string(), in_tx, out_rx, handle))
+        Ok(CCProtocolInitOk {
+            protocol_tag: "irc".to_string(),
+            sender: in_tx,
+            receiver: out_rx,
+            join_handle: handle,
+        })
     }
 }

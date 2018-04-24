@@ -11,7 +11,7 @@ extern crate serenity;
 extern crate text_io;
 
 mod protocol;
-pub use protocol::{OmniProtocol, ProtocolLinker};
+pub use protocol::{CCProtocol, ProtocolLinker};
 
 #[cfg(feature = "discord_protocol")]
 pub use protocol::discord::Discord;

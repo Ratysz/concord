@@ -57,7 +57,7 @@ impl CCProtocol for Terminal {
         trace!("Threads spawned.");
 
         Ok(CCProtocolInitOk {
-            protocol_tag: "terminal".to_string(),
+            protocol_tag: "terminal",
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,

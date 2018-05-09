@@ -15,12 +15,12 @@ pub mod irc;
 #[cfg(feature = "terminal_protocol")]
 pub mod terminal;
 
-pub type CCProtocolTag = String;
-pub type ChannelTag = String;
+pub type CCProtocolTag = &'static str;
+pub type CCChannelTag = String;
 
 #[derive(Clone, Debug)]
 pub struct CCMessage {
-    channel: ChannelTag,
+    channel: CCChannelTag,
     text: String,
 }
 
@@ -38,18 +38,18 @@ pub trait CCProtocol {
 }
 
 #[derive(Debug)]
-pub struct ProtocolLinker {
+pub struct ConcordCore {
     p_map_ref: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
     p_handles: Vec<JoinHandle<()>>,
-    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<ChannelTag>>>>,
+    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
 }
 
-impl ProtocolLinker {
+impl ConcordCore {
     pub fn new(config: &OmniConfig) -> Self {
         let ch_map = config
-            .get::<Vec<HashMap<ChannelTag, Vec<ChannelTag>>>>("channel")
+            .get::<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>("channel")
             .unwrap();
-        ProtocolLinker {
+        ConcordCore {
             p_map_ref: Arc::new(RwLock::new(HashMap::new())),
             p_handles: Vec::new(),
             ch_map_ref: Arc::new(ch_map),
@@ -57,19 +57,19 @@ impl ProtocolLinker {
     }
 
     fn map_channel(
-        ch_map_ref: &Arc<Vec<HashMap<CCProtocolTag, Vec<ChannelTag>>>>,
-        source_protocol: &CCProtocolTag,
-        source_channel: &ChannelTag,
-    ) -> Vec<(CCProtocolTag, ChannelTag)> {
+        ch_map_ref: &Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
+        source_protocol: CCProtocolTag,
+        source_channel: &CCChannelTag,
+    ) -> Vec<(CCProtocolTag, CCChannelTag)> {
         debug!(
             "+> Mapping channels for {}-{}",
-            &source_protocol, &source_channel
+            source_protocol, &source_channel
         );
-        let mut mapped = Vec::<(CCProtocolTag, ChannelTag)>::new();
+        let mut mapped = Vec::<(CCProtocolTag, CCChannelTag)>::new();
         for p_ch_map in ch_map_ref.iter() {
             let mut should_map = false;
             'outer: for (protocol, ch_vec) in p_ch_map {
-                if protocol == source_protocol {
+                if protocol == &source_protocol {
                     for channel in ch_vec {
                         if channel == source_channel {
                             should_map = true;
@@ -82,7 +82,7 @@ impl ProtocolLinker {
             if should_map {
                 for (protocol, ch_vec) in p_ch_map {
                     for channel in ch_vec {
-                        if !(protocol == source_protocol && channel == source_channel) {
+                        if !(protocol == &source_protocol && channel == source_channel) {
                             mapped.push((protocol.clone(), channel.clone()));
                         }
                     }
@@ -102,7 +102,7 @@ impl ProtocolLinker {
         } = result.unwrap();
         {
             let mut locked = self.p_map_ref.write().unwrap();
-            locked.insert(protocol_tag.clone(), sender);
+            locked.insert(protocol_tag, sender);
         }
         let p_map_ref_clone = self.p_map_ref.clone();
         let ch_map_ref_clone = self.ch_map_ref.clone();
@@ -112,19 +112,19 @@ impl ProtocolLinker {
                 if let Ok(msg) = message {
                     let p_map = p_map_ref_clone.read().unwrap();
                     for (protocol, channel) in
-                        ProtocolLinker::map_channel(&ch_map_ref_clone, &protocol_tag, &msg.channel)
+                        ConcordCore::map_channel(&ch_map_ref_clone, protocol_tag, &msg.channel)
                     {
                         if let Some(p_in) = p_map.get(&protocol) {
                             debug!(
                                 "Relaying from {}-{} to {}-{}: {:?}",
-                                &protocol_tag, &msg.channel, &protocol, &channel, &msg,
+                                protocol_tag, &msg.channel, &protocol, &channel, &msg,
                             );
                             let mut t_msg = msg.clone();
                             t_msg.channel = channel;
                             if let Err(e) = p_in.clone().send(t_msg).wait() {
                                 error!(
                                     "Linker failed to transmit from {} to {}: {}",
-                                    &protocol_tag, &protocol, e
+                                    protocol_tag, &protocol, e
                                 );
                             }
                         }
@@ -157,7 +157,7 @@ mod test {
         let mut config = config::Config::default();
         config.merge(config::File::with_name("config")).unwrap();
 
-        let mut p_linker = ProtocolLinker::new(&config);
+        let mut p_linker = ConcordCore::new(&config);
         debug!("Linker dump: {:?}", p_linker);
     }
 
@@ -166,7 +166,7 @@ mod test {
         let mut config = config::Config::default();
         config.merge(config::File::with_name("config")).unwrap();
 
-        let mut p_linker = ProtocolLinker::new(&config);
+        let mut p_linker = ConcordCore::new(&config);
         p_linker
             .spawn_relay_thread(Terminal::new(&config))
             .join_all();

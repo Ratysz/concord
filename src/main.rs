@@ -29,16 +29,16 @@ fn main() {
         Err(e) => error!("[APP] Couldn't create systray app: {}", e),
     }
 
-    let mut p_linker = ProtocolLinker::new(&config);
+    let mut concord = ConcordCore::new(&config);
 
     #[cfg(feature = "discord_protocol")]
-    p_linker.spawn_relay_thread(Discord::new(&config));
+    concord.spawn_relay_thread(Discord::new(&config));
 
     #[cfg(feature = "irc_protocol")]
-    p_linker.spawn_relay_thread(Irc::new(&config));
+    concord.spawn_relay_thread(Irc::new(&config));
 
     #[cfg(feature = "terminal_protocol")]
-    p_linker.spawn_relay_thread(Terminal::new(&config));
+    concord.spawn_relay_thread(Terminal::new(&config));
 
-    p_linker.join_all();
+    concord.join_all();
 }

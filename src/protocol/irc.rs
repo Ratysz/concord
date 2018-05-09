@@ -60,7 +60,7 @@ impl CCProtocol for Irc {
         });
 
         Ok(CCProtocolInitOk {
-            protocol_tag: "irc".to_string(),
+            protocol_tag: "irc",
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,

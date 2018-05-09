@@ -89,7 +89,7 @@ impl CCProtocol for Discord {
         trace!("Threads spawned.");
 
         Ok(CCProtocolInitOk {
-            protocol_tag: "discord".to_string(),
+            protocol_tag: "discord",
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,

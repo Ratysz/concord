@@ -2,7 +2,13 @@ use protocol::*;
 
 impl From<String> for CCMessage {
     fn from(text: String) -> Self {
-        let mut vec: Vec<&str> = text.splitn(2, "|").collect();
+        CCMessage {
+            author: CCAuthorTag("term"),
+            source_channel: CCChannelTag("term"),
+            raw_contents: text,
+            contents: Vec::new(),
+        }
+        /*let mut vec: Vec<&str> = text.splitn(2, "|").collect();
         if let (Some(text), Some(channel)) = (vec.pop(), vec.pop()) {
             let msg = CCMessage {
                 channel: channel.to_string(),
@@ -16,51 +22,38 @@ impl From<String> for CCMessage {
                 channel: "debug".to_string(),
                 text: format!("Malformed message sent via terminal: {}", text).to_string(),
             }
-        }
+        }*/
     }
 }
 
 pub struct Terminal;
 
 impl CCProtocol for Terminal {
-    fn new(config: &OmniConfig) -> CCProtocolInitResult {
+    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
         trace!("Starting up.");
         let (in_tx, in_rx) = channel::<CCMessage>(100);
         let (out_tx, out_rx) = channel::<CCMessage>(100);
 
-        trace!("Configured, spawning threads.");
-        let handle = thread::spawn(move || {
-            trace!("Sender thread spawned.");
-            let handle = thread::spawn(move || {
-                trace!("Receiver thread spawned.");
-                for message in in_rx.wait() {
-                    trace!("Received message: {:?}", &message);
-                    if let Ok(msg) = message {
-                        println!("{}|{}", msg.channel, msg.text);
-                    }
-                }
-                trace!("Receiver thread done.");
-            });
+        runtime.spawn(in_rx.for_each(|msg| {
+            trace!("Received message: {:?}", msg);
+            println!("{:#?}", msg);
+            Ok(())
+        }));
 
-            loop {
+        runtime.spawn(future::poll_fn(move || {
+            blocking(|| loop {
                 let line: String = read!("{}\n");
                 trace!("Sending message: {:?}", &line);
                 if let Err(e) = out_tx.clone().send(CCMessage::from(line)).wait() {
                     error!("Terminal failed to transmit: {}", e);
                 }
-            }
-            trace!("Sender thread done, joining.");
+            }).map_err(|_| panic!("the threadpool shut down"))
+        }));
 
-            handle.join().unwrap();
-            trace!("Threads joined.");
-        });
-        trace!("Threads spawned.");
-
-        Ok(CCProtocolInitOk {
+        Ok(CCProtocolHandles {
             protocol_tag: "terminal",
             sender: in_tx,
             receiver: out_rx,
-            join_handle: handle,
         })
     }
 }

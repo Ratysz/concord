@@ -1,9 +1,10 @@
-use protocol::*;
 use irc_crate::client::prelude::*;
+use protocol::*;
 
 impl From<Message> for CCMessage {
     fn from(msg: Message) -> Self {
-        let (channel, text) = match msg.command.clone() {
+        unimplemented!();
+        /*let (channel, text) = match msg.command.clone() {
             Command::PRIVMSG(chan, cont) => (
                 chan,
                 format!(
@@ -19,15 +20,16 @@ impl From<Message> for CCMessage {
             ),
             _ => ("debug".to_string(), format!("{:?}", msg)),
         };
-        CCMessage { channel, text }
+        CCMessage { channel, text }*/
     }
 }
 
 pub struct Irc;
 
 impl CCProtocol for Irc {
-    fn new(config: &OmniConfig) -> CCProtocolInitResult {
-        let irc_config = Config {
+    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
+        unimplemented!();
+        /*let irc_config = Config {
             nickname: Some("the-irc-crate".to_owned()),
             server: Some("irc.mozilla.org".to_owned()),
             channels: Some(vec!["#ratys-bot-test".to_owned()]),
@@ -59,11 +61,11 @@ impl CCProtocol for Irc {
             reactor.run().unwrap();
         });
 
-        Ok(CCProtocolInitOk {
+        Ok(CCProtocolHandles {
             protocol_tag: "irc",
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,
-        })
+        })*/
     }
 }

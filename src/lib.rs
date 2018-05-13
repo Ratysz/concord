@@ -4,11 +4,16 @@ extern crate futures;
 extern crate irc as irc_crate;
 #[macro_use]
 extern crate log;
+extern crate serde;
 #[cfg(feature = "discord_protocol")]
 extern crate serenity;
+#[macro_use]
+extern crate serde_derive;
 #[cfg(feature = "terminal_protocol")]
 #[macro_use]
 extern crate text_io;
+extern crate tokio;
+extern crate tokio_threadpool;
 
 mod protocol;
 pub use protocol::{CCProtocol, ConcordCore};

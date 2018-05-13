@@ -1,12 +1,12 @@
-pub use config::Config as OmniConfig;
-pub use futures::{Future, Sink, Stream};
+pub use config::Config;
 pub use futures::sync::mpsc::{channel, Receiver, Sender};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::RwLock;
-pub use std::thread;
-pub use std::thread::JoinHandle;
+use std::thread;
 use std::time::Duration;
+pub use tokio::{prelude::*, runtime::Runtime};
+pub use tokio_threadpool::blocking;
 
 #[cfg(feature = "discord_protocol")]
 pub mod discord;
@@ -15,48 +15,78 @@ pub mod irc;
 #[cfg(feature = "terminal_protocol")]
 pub mod terminal;
 
-pub type CCProtocolTag = &'static str;
-pub type CCChannelTag = String;
+pub type CCResult<T> = Result<T, String>;
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct CCAuthorTag(&'static str);
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct CCChannelTag(&'static str);
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct CCProtocolTag(&'static str);
 
 #[derive(Clone, Debug)]
 pub struct CCMessage {
-    channel: CCChannelTag,
-    text: String,
+    author: CCAuthorTag,
+    source_channel: CCChannelTag,
+    raw_contents: String,
+    contents: Vec<CCMessageFragment>,
 }
 
-pub type CCProtocolInitResult = Result<CCProtocolInitOk, &'static str>;
+#[derive(Clone, Debug)]
+pub enum CCMessageFragment {
+    ConcordCommand(CCCommand),
+    Plain(String),
+}
 
-pub struct CCProtocolInitOk {
-    pub protocol_tag: CCProtocolTag,
+#[derive(Clone, Debug)]
+pub enum CCCommand {
+
+}
+
+pub struct CCProtocolHandles {
+    pub protocol_tag: &'static str,
     pub sender: Sender<CCMessage>,
     pub receiver: Receiver<CCMessage>,
-    pub join_handle: JoinHandle<()>,
 }
 
 pub trait CCProtocol {
-    fn new(config: &OmniConfig) -> CCProtocolInitResult;
+    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles>;
+}
+
+pub mod config {
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Protocol {
+        protocol_tag: String,
+        sources: Vec<Source>,
+        destinations: Vec<Destination>,
+    }
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Source {}
+
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct Destination {}
 }
 
 #[derive(Debug)]
 pub struct ConcordCore {
-    p_map_ref: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
-    p_handles: Vec<JoinHandle<()>>,
-    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
+    /*p_map_ref: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
+    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,*/
+    config: Config,
+    runtime: Runtime,
 }
 
 impl ConcordCore {
-    pub fn new(config: &OmniConfig) -> Self {
-        let ch_map = config
-            .get::<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>("channel")
-            .unwrap();
-        ConcordCore {
-            p_map_ref: Arc::new(RwLock::new(HashMap::new())),
-            p_handles: Vec::new(),
-            ch_map_ref: Arc::new(ch_map),
-        }
+    pub fn new(config: Config) -> CCResult<ConcordCore> {
+        let runtime = Runtime::new()
+            .map_err(|e| -> String { format!("error creating tokio runtime: {}", e) })?;
+        /*let raw_protocols = config
+            .get::<Vec<config::Protocol>>("protocol")
+            .map_err(|e| -> String { format!("config error: {}", e) })?;*/
+        Ok(ConcordCore { config, runtime })
     }
 
-    fn map_channel(
+    /*fn map_channel(
         ch_map_ref: &Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
         source_protocol: CCProtocolTag,
         source_channel: &CCChannelTag,
@@ -91,10 +121,28 @@ impl ConcordCore {
         }
         debug!("+> Recipients: {:?}", &mapped);
         mapped
-    }
+    }*/
 
-    pub fn spawn_relay_thread(&mut self, result: CCProtocolInitResult) -> &mut Self {
-        let CCProtocolInitOk {
+    pub fn initialize_protocol<T>(&mut self, _protocol: T) -> CCResult<&mut Self>
+    where
+        T: CCProtocol,
+    {
+        let CCProtocolHandles {
+            protocol_tag,
+            sender,
+            receiver,
+        } = <T>::initialize(&mut self.runtime)?;
+        self.runtime.spawn(receiver.for_each(move |msg| {
+            trace!("Relaying message: {:?}", msg);
+            Ok(())
+        }));
+        self.runtime.spawn(future::poll_fn(|| {
+            blocking(|| loop {
+                trace!("tick");
+                thread::sleep(Duration::new(1, 0));
+            }).map_err(|_| panic!("the threadpool shut down"))
+        }));
+        /*let CCProtocolHandles {
             protocol_tag,
             sender,
             receiver,
@@ -132,16 +180,21 @@ impl ConcordCore {
                 }
             }
             join_handle.join().unwrap();
-        }));
+        }));*/
+        Ok(self)
+    }
+
+    pub fn spawn_future<F>(&mut self, future: F) -> &mut Self
+    where
+        F: Future<Item = (), Error = ()> + Send + 'static,
+    {
+        self.runtime.spawn(future);
         self
     }
 
-    pub fn join_all(&mut self) {
-        loop {
-            match self.p_handles.pop() {
-                Some(handle) => handle.join().unwrap(),
-                None => break,
-            };
+    pub fn run(self) {
+        if let Err(_) = self.runtime.shutdown_on_idle().wait() {
+            error!("Internal tokio error!");
         }
     }
 }
@@ -149,8 +202,8 @@ impl ConcordCore {
 #[cfg(test)]
 mod test {
     use config;
-    use protocol::*;
     use protocol::terminal::Terminal;
+    use protocol::*;
 
     #[test]
     fn config() {

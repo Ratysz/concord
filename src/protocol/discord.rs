@@ -1,15 +1,16 @@
 use protocol::*;
 use serenity;
-use serenity::prelude::*;
 use serenity::model::prelude::*;
+use serenity::prelude::*;
 use std::sync::RwLock;
 
 impl From<Message> for CCMessage {
     fn from(msg: Message) -> Self {
-        CCMessage {
+        unimplemented!();
+        /*CCMessage {
             channel: msg.channel_id.to_string(),
             text: msg.content,
-        }
+        }*/
     }
 }
 
@@ -23,29 +24,32 @@ struct Handler {
 
 impl EventHandler for Handler {
     fn message(&self, _: Context, msg: Message) {
-        if let Some(bot_id) = *self.bot_user_id.read().unwrap() {
+        unimplemented!();
+        /*if let Some(bot_id) = *self.bot_user_id.read().unwrap() {
             if msg.author.id != bot_id {
                 trace!("Sending message: {:?}", &msg);
                 if let Err(e) = self.tx.clone().send(CCMessage::from(msg)).wait() {
                     error!("Discord failed to transmit: {}", e);
                 }
             }
-        }
+        }*/
     }
 
     fn ready(&self, _: Context, ready: Ready) {
-        info!(
+        unimplemented!();
+        /*info!(
             "Discord connected as {}({}).",
             ready.user.name, ready.user.id
         );
         let ref mut ref_bot_user_id = *self.bot_user_id.write().unwrap();
-        *ref_bot_user_id = Some(ready.user.id);
+        *ref_bot_user_id = Some(ready.user.id);*/
     }
 }
 
 impl CCProtocol for Discord {
-    fn new(config: &OmniConfig) -> CCProtocolInitResult {
-        trace!("Starting up.");
+    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
+        unimplemented!();
+        /*trace!("Starting up.");
         let token = config.get::<String>("discord_token").unwrap();
         let (in_tx, in_rx) = channel::<CCMessage>(100);
         let (out_tx, out_rx) = channel::<CCMessage>(100);
@@ -88,11 +92,11 @@ impl CCProtocol for Discord {
         });
         trace!("Threads spawned.");
 
-        Ok(CCProtocolInitOk {
+        Ok(CCProtocolHandles {
             protocol_tag: "discord",
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,
-        })
+        })*/
     }
 }

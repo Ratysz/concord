@@ -18,7 +18,6 @@ terminal_protocol = ["text_io"]
 
 [dependencies]
 config = "0.8"
-futures = "0.1"
 irc = { version = "0.13", optional = true }
 log = "0.4"
 serde = "1.0"
@@ -28,6 +27,7 @@ simplelog = "0.5"
 systray = "0.2"
 text_io = { version = "0.1", optional = true }
 tokio = "0.1"
+tokio-core = "0.1"
 tokio-threadpool = "~0.1.3"
 
 [profile.release]

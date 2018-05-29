@@ -93,7 +93,7 @@ impl CCProtocol for Discord {
         trace!("Threads spawned.");
 
         Ok(CCProtocolHandles {
-            protocol_tag: "discord",
+            protocol_tag: CCProtocolTag("discord"),
             sender: in_tx,
             receiver: out_rx,
             join_handle: handle,

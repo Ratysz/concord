@@ -1,12 +1,12 @@
-pub use config::Config;
-pub use futures::sync::mpsc::{channel, Receiver, Sender};
+use config::Config;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::RwLock;
+pub use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time::Duration;
 pub use tokio::{prelude::*, runtime::Runtime};
-pub use tokio_threadpool::blocking;
+pub use tokio_core::reactor::Timeout;
+pub use tokio_threadpool::{blocking, BlockingError};
 
 #[cfg(feature = "discord_protocol")]
 pub mod discord;
@@ -25,26 +25,34 @@ pub struct CCChannelTag(&'static str);
 pub struct CCProtocolTag(&'static str);
 
 #[derive(Clone, Debug)]
-pub struct CCMessage {
-    author: CCAuthorTag,
-    source_channel: CCChannelTag,
-    raw_contents: String,
-    contents: Vec<CCMessageFragment>,
+pub enum CCMessage {
+    Message {
+        author: CCAuthorTag,
+        source_channel: CCChannelTag,
+        raw_contents: String,
+        contents: Vec<CCMessageFragment>,
+    },
+    Control(CCControl),
 }
 
 #[derive(Clone, Debug)]
 pub enum CCMessageFragment {
-    ConcordCommand(CCCommand),
+    Command(CCCommand),
     Plain(String),
 }
 
 #[derive(Clone, Debug)]
 pub enum CCCommand {
+    Shutdown,
+}
 
+#[derive(Clone, Debug)]
+pub enum CCControl {
+    Shutdown,
 }
 
 pub struct CCProtocolHandles {
-    pub protocol_tag: &'static str,
+    pub protocol_tag: CCProtocolTag,
     pub sender: Sender<CCMessage>,
     pub receiver: Receiver<CCMessage>,
 }
@@ -70,20 +78,30 @@ pub mod config {
 
 #[derive(Debug)]
 pub struct ConcordCore {
-    /*p_map_ref: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
-    ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,*/
+    //ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
     config: Config,
     runtime: Runtime,
+    control_sender: Sender<CCControl>,
+    control_receiver: Receiver<CCControl>,
+    protocol_senders: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
 }
 
 impl ConcordCore {
     pub fn new(config: Config) -> CCResult<ConcordCore> {
         let runtime = Runtime::new()
             .map_err(|e| -> String { format!("error creating tokio runtime: {}", e) })?;
+        let (command_sender, command_receiver) = channel();
+        let protocol_senders = Arc::new(RwLock::new(HashMap::new()));
         /*let raw_protocols = config
             .get::<Vec<config::Protocol>>("protocol")
             .map_err(|e| -> String { format!("config error: {}", e) })?;*/
-        Ok(ConcordCore { config, runtime })
+        Ok(ConcordCore {
+            config,
+            runtime,
+            control_sender: command_sender,
+            control_receiver: command_receiver,
+            protocol_senders,
+        })
     }
 
     /*fn map_channel(
@@ -132,16 +150,36 @@ impl ConcordCore {
             sender,
             receiver,
         } = <T>::initialize(&mut self.runtime)?;
-        self.runtime.spawn(receiver.for_each(move |msg| {
-            trace!("Relaying message: {:?}", msg);
-            Ok(())
-        }));
+        self.protocol_senders
+            .write()
+            .unwrap()
+            .insert(protocol_tag, sender);
+
+        let control_sender = self.control_sender.clone();
+        self.runtime
+            .spawn(stream::iter_ok(receiver).for_each(move |msg| {
+                trace!("Received message: {:?}", msg);
+                match msg {
+                    CCMessage::Message { contents, .. } => for fragment in &contents {
+                        if let CCMessageFragment::Command(cmd) = fragment {
+                            match cmd {
+                                Shutdown => control_sender.send(CCControl::Shutdown).unwrap(),
+                                _ => warn!("unhandled command {:?}!", cmd),
+                            }
+                        }
+                    },
+                    _ => (),
+                }
+                Ok(())
+            }));
+
         self.runtime.spawn(future::poll_fn(|| {
             blocking(|| loop {
                 trace!("tick");
                 thread::sleep(Duration::new(1, 0));
             }).map_err(|_| panic!("the threadpool shut down"))
         }));
+
         /*let CCProtocolHandles {
             protocol_tag,
             sender,
@@ -193,9 +231,27 @@ impl ConcordCore {
     }
 
     pub fn run(self) {
-        if let Err(_) = self.runtime.shutdown_on_idle().wait() {
-            error!("Internal tokio error!");
-        }
+        let runtime_future = self.runtime.shutdown_on_idle();
+
+        let protocol_senders = self.protocol_senders.clone();
+        stream::iter_ok::<_, ()>(self.control_receiver)
+            .for_each(|cmd| {
+                info!("Control: {:?}", cmd);
+                match cmd {
+                    Shutdown => {
+                        let msg = CCMessage::Control(CCControl::Shutdown);
+                        for sender in protocol_senders.read().unwrap().values() {
+                            sender.send(msg.clone()).unwrap();
+                        }
+                    }
+                    _ => warn!("unhandled command {:?}!", cmd),
+                }
+                Ok(())
+            })
+            .wait()
+            .unwrap();
+
+        runtime_future.wait().unwrap();
     }
 }
 

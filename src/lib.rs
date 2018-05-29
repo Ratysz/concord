@@ -1,5 +1,4 @@
 extern crate config;
-extern crate futures;
 #[cfg(feature = "irc_protocol")]
 extern crate irc as irc_crate;
 #[macro_use]
@@ -13,6 +12,7 @@ extern crate serde_derive;
 #[macro_use]
 extern crate text_io;
 extern crate tokio;
+extern crate tokio_core;
 extern crate tokio_threadpool;
 
 mod protocol;

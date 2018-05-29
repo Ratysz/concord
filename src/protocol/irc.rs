@@ -27,7 +27,7 @@ impl From<Message> for CCMessage {
 pub struct Irc;
 
 impl CCProtocol for Irc {
-    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
+    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         unimplemented!();
         /*let irc_config = Config {
             nickname: Some("the-irc-crate".to_owned()),

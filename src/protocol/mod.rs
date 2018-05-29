@@ -3,7 +3,7 @@ use std::collections::HashMap;
 pub use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, RwLock};
 use std::thread;
-use std::time::Duration;
+use std::time;
 pub use tokio::{prelude::*, runtime::Runtime};
 pub use tokio_core::reactor::Timeout;
 pub use tokio_threadpool::{blocking, BlockingError};
@@ -18,11 +18,11 @@ pub mod terminal;
 pub type CCResult<T> = Result<T, String>;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct CCAuthorTag(&'static str);
+pub struct CCAuthorTag(pub &'static str);
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct CCChannelTag(&'static str);
+pub struct CCChannelTag(pub &'static str);
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct CCProtocolTag(&'static str);
+pub struct ProtocolTag(pub &'static str);
 
 #[derive(Clone, Debug)]
 pub enum CCMessage {
@@ -32,33 +32,28 @@ pub enum CCMessage {
         raw_contents: String,
         contents: Vec<CCMessageFragment>,
     },
-    Control(CCControl),
+    Control(Command),
 }
 
 #[derive(Clone, Debug)]
 pub enum CCMessageFragment {
-    Command(CCCommand),
+    Command(),
     Plain(String),
 }
 
 #[derive(Clone, Debug)]
-pub enum CCCommand {
+pub enum Command {
     Shutdown,
 }
 
-#[derive(Clone, Debug)]
-pub enum CCControl {
-    Shutdown,
-}
-
-pub struct CCProtocolHandles {
-    pub protocol_tag: CCProtocolTag,
+pub struct ProtocolHandles {
+    pub protocol_tag: ProtocolTag,
     pub sender: Sender<CCMessage>,
     pub receiver: Receiver<CCMessage>,
 }
 
 pub trait CCProtocol {
-    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles>;
+    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles>;
 }
 
 pub mod config {
@@ -81,9 +76,9 @@ pub struct ConcordCore {
     //ch_map_ref: Arc<Vec<HashMap<CCProtocolTag, Vec<CCChannelTag>>>>,
     config: Config,
     runtime: Runtime,
-    control_sender: Sender<CCControl>,
-    control_receiver: Receiver<CCControl>,
-    protocol_senders: Arc<RwLock<HashMap<CCProtocolTag, Sender<CCMessage>>>>,
+    command_sender: Sender<Command>,
+    command_receiver: Receiver<Command>,
+    protocol_senders: Arc<RwLock<HashMap<ProtocolTag, Sender<CCMessage>>>>,
 }
 
 impl ConcordCore {
@@ -98,8 +93,8 @@ impl ConcordCore {
         Ok(ConcordCore {
             config,
             runtime,
-            control_sender: command_sender,
-            control_receiver: command_receiver,
+            command_sender,
+            command_receiver,
             protocol_senders,
         })
     }
@@ -145,7 +140,7 @@ impl ConcordCore {
     where
         T: CCProtocol,
     {
-        let CCProtocolHandles {
+        let ProtocolHandles {
             protocol_tag,
             sender,
             receiver,
@@ -155,30 +150,20 @@ impl ConcordCore {
             .unwrap()
             .insert(protocol_tag, sender);
 
-        let control_sender = self.control_sender.clone();
+        let control_sender = self.command_sender.clone();
         self.runtime
             .spawn(stream::iter_ok(receiver).for_each(move |msg| {
                 trace!("Received message: {:?}", msg);
                 match msg {
                     CCMessage::Message { contents, .. } => for fragment in &contents {
-                        if let CCMessageFragment::Command(cmd) = fragment {
-                            match cmd {
-                                Shutdown => control_sender.send(CCControl::Shutdown).unwrap(),
-                                _ => warn!("unhandled command {:?}!", cmd),
-                            }
+                        if let CCMessageFragment::Command() = fragment {
+                            control_sender.send(Command::Shutdown).unwrap();
                         }
                     },
-                    _ => (),
+                    CCMessage::Control(command) => control_sender.send(command).unwrap(),
                 }
                 Ok(())
             }));
-
-        self.runtime.spawn(future::poll_fn(|| {
-            blocking(|| loop {
-                trace!("tick");
-                thread::sleep(Duration::new(1, 0));
-            }).map_err(|_| panic!("the threadpool shut down"))
-        }));
 
         /*let CCProtocolHandles {
             protocol_tag,
@@ -230,28 +215,40 @@ impl ConcordCore {
         self
     }
 
+    pub fn command_sender(&self) -> Sender<Command> {
+        self.command_sender.clone()
+    }
+
+    pub fn queue_command(&self, command: Command) {
+        self.command_sender.send(command);
+    }
+
     pub fn run(self) {
         let runtime_future = self.runtime.shutdown_on_idle();
 
-        let protocol_senders = self.protocol_senders.clone();
-        stream::iter_ok::<_, ()>(self.control_receiver)
-            .for_each(|cmd| {
-                info!("Control: {:?}", cmd);
-                match cmd {
-                    Shutdown => {
-                        let msg = CCMessage::Control(CCControl::Shutdown);
-                        for sender in protocol_senders.read().unwrap().values() {
-                            sender.send(msg.clone()).unwrap();
+        future::loop_fn(
+            (self.command_receiver, self.protocol_senders),
+            |(command_rx, protocol_txs)| {
+                if let Ok(command) = command_rx.recv_timeout(time::Duration::from_secs(1)) {
+                    info!("Control: {:?}", command);
+                    match command {
+                        Command::Shutdown => {
+                            let message = CCMessage::Control(Command::Shutdown);
+                            for sender in protocol_txs.read().unwrap().values() {
+                                sender.send(message.clone()).unwrap();
+                            }
+                            return Ok(future::Loop::Break(()));
                         }
                     }
-                    _ => warn!("unhandled command {:?}!", cmd),
                 }
-                Ok(())
-            })
+                Ok(future::Loop::Continue((command_rx, protocol_txs)))
+            },
+        ).map_err(|_: ()| {})
             .wait()
             .unwrap();
 
         runtime_future.wait().unwrap();
+        info!("Clean shutdown!");
     }
 }
 

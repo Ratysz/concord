@@ -5,7 +5,7 @@ impl From<String> for CCMessage {
     fn from(text: String) -> Self {
         let mut contents = Vec::new();
         if text.contains("shutdown") {
-            contents.push(CCMessageFragment::Command(CCCommand::Shutdown));
+            contents.push(CCMessageFragment::Command());
         }
         CCMessage::Message {
             author: CCAuthorTag("term"),
@@ -34,7 +34,7 @@ impl From<String> for CCMessage {
 pub struct Terminal;
 
 impl CCProtocol for Terminal {
-    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
+    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         trace!("Starting up.");
         let (in_tx, in_rx) = channel::<CCMessage>();
         let (out_tx, out_rx) = channel::<CCMessage>();
@@ -45,13 +45,10 @@ impl CCProtocol for Terminal {
             if let Ok(message) = in_rx.recv_timeout(time::Duration::from_secs(1)) {
                 match message {
                     CCMessage::Control(command) => match command {
-                        Shutdown => {
+                        Command::Shutdown => {
                             intra_tx.send(());
                             trace!("Receiver task done.");
                             return Ok(future::Loop::Break(()));
-                        }
-                        _ => {
-                            warn!("Unhandled command {:?}!", command);
                         }
                     },
                     CCMessage::Message { raw_contents, .. } => {
@@ -93,8 +90,8 @@ impl CCProtocol for Terminal {
             }),
         );
 
-        Ok(CCProtocolHandles {
-            protocol_tag: CCProtocolTag("terminal"),
+        Ok(ProtocolHandles {
+            protocol_tag: ProtocolTag("terminal"),
             sender: in_tx,
             receiver: out_rx,
         })

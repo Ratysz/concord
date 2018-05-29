@@ -15,8 +15,8 @@ extern crate tokio;
 extern crate tokio_core;
 extern crate tokio_threadpool;
 
-mod protocol;
-pub use protocol::{CCProtocol, ConcordCore};
+pub mod protocol;
+pub use protocol::{CCProtocol, Command, ConcordCore};
 
 #[cfg(feature = "discord_protocol")]
 pub use protocol::discord::Discord;

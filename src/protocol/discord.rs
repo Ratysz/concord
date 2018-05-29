@@ -47,7 +47,7 @@ impl EventHandler for Handler {
 }
 
 impl CCProtocol for Discord {
-    fn initialize(runtime: &mut Runtime) -> CCResult<CCProtocolHandles> {
+    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         unimplemented!();
         /*trace!("Starting up.");
         let token = config.get::<String>("discord_token").unwrap();

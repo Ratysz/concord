@@ -38,57 +38,38 @@ impl CCProtocol for Terminal {
         trace!("Starting up.");
         let (in_tx, in_rx) = channel::<CCMessage>();
         let (out_tx, out_rx) = channel::<CCMessage>();
-        let (intra_tx, intra_rx) = channel::<()>();
 
-        runtime.spawn(future::loop_fn((in_rx, intra_tx), |(in_rx, intra_tx)| {
-            //blocking(|| {
-            if let Ok(message) = in_rx.recv_timeout(time::Duration::from_secs(1)) {
-                match message {
-                    CCMessage::Control(command) => match command {
-                        Command::Shutdown => {
-                            intra_tx.send(());
-                            trace!("Receiver task done.");
-                            return Ok(future::Loop::Break(()));
-                        }
-                    },
-                    CCMessage::Message { raw_contents, .. } => {
-                        println!("{:?}", raw_contents);
+        let in_tx_clone = in_tx.clone();
+        thread::spawn(move || loop {
+            let line: String = read!("{}\n");
+            in_tx_clone.send(CCMessage::from(line)).unwrap();
+        });
+
+        runtime.spawn(stream::iter_ok(in_rx).for_each(move |message| {
+            let mut send = false;
+            match message {
+                CCMessage::Control(command) => match command {
+                    Command::Shutdown => {
+                        trace!("Terminating.");
+                        return Err(());
                     }
-                }
+                },
+                CCMessage::Message {
+                    ref author,
+                    ref raw_contents,
+                    ..
+                } => if author == &CCAuthorTag("term") {
+                    send = true;
+                } else {
+                    println!("{:?}", raw_contents);
+                },
             }
-            //});
-            Ok(future::Loop::Continue((in_rx, intra_tx)))
+            if send {
+                trace!("Sending message: {:?}", &message);
+                out_tx.send(message).unwrap();
+            }
+            Ok(())
         }));
-
-        runtime.spawn(
-            future::lazy(|| {
-                let (term_tx, term_rx) = channel::<String>();
-                trace!("Starting terminal input thread.");
-                thread::spawn(move || loop {
-                    let line: String = read!("{}\n");
-                    term_tx.send(line);
-                });
-                Ok(term_rx)
-            }).and_then(|term_rx| {
-                future::loop_fn(
-                    (out_tx, intra_rx, term_rx),
-                    |(out_tx, intra_rx, term_rx)| {
-                        if intra_rx.try_recv().is_err() {
-                            //blocking(|| {
-                            if let Ok(line) = term_rx.recv_timeout(time::Duration::from_secs(1)) {
-                                trace!("Sending message: {:?}", &line);
-                                out_tx.send(CCMessage::from(line)).unwrap();
-                            }
-                            //});
-                            Ok(future::Loop::Continue((out_tx, intra_rx, term_rx)))
-                        } else {
-                            trace!("Sender task done.");
-                            Ok(future::Loop::Break(()))
-                        }
-                    },
-                )
-            }),
-        );
 
         Ok(ProtocolHandles {
             protocol_tag: ProtocolTag("terminal"),

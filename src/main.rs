@@ -1,4 +1,4 @@
-#![windows_subsystem = "windows"]
+//#![windows_subsystem = "windows"]
 extern crate chrono;
 extern crate concord_core;
 extern crate config;

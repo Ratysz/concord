@@ -1,10 +1,10 @@
 use protocol::*;
-use serenity;
-use serenity::model::prelude::*;
-use serenity::prelude::*;
+use serenity::model::id as s_id;
+use serenity::model::prelude as s_model;
+use serenity::prelude as s;
 use std::sync::RwLock;
 
-impl From<Message> for CCMessage {
+impl From<Message> for s_model::Message {
     fn from(msg: Message) -> Self {
         unimplemented!();
         /*CCMessage {
@@ -17,13 +17,13 @@ impl From<Message> for CCMessage {
 pub struct Discord;
 
 struct Handler {
-    tx: Sender<CCMessage>,
-    bot_user_id: RwLock<Option<serenity::model::id::UserId>>,
+    tx: Sender<Message>,
+    bot_user_id: RwLock<Option<s_id::UserId>>,
     // Needs interior mutability, is threaded, and unknown at init.
 }
 
-impl EventHandler for Handler {
-    fn message(&self, _: Context, msg: Message) {
+impl s::EventHandler for Handler {
+    fn message(&self, _: s::Context, msg: s_model::Message) {
         unimplemented!();
         /*if let Some(bot_id) = *self.bot_user_id.read().unwrap() {
             if msg.author.id != bot_id {
@@ -35,7 +35,7 @@ impl EventHandler for Handler {
         }*/
     }
 
-    fn ready(&self, _: Context, ready: Ready) {
+    fn ready(&self, _: s::Context, ready: s_model::Ready) {
         unimplemented!();
         /*info!(
             "Discord connected as {}({}).",
@@ -46,7 +46,7 @@ impl EventHandler for Handler {
     }
 }
 
-impl CCProtocol for Discord {
+impl Protocol for Discord {
     fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         unimplemented!();
         /*trace!("Starting up.");

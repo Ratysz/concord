@@ -17,25 +17,25 @@ pub mod terminal;
 pub type CCResult<T> = Result<T, String>;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct CCAuthorTag(pub &'static str);
+pub struct AuthorTag(pub &'static str);
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct CCChannelTag(pub &'static str);
+pub struct ChannelTag(pub &'static str);
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ProtocolTag(pub &'static str);
 
 #[derive(Clone, Debug)]
-pub enum CCMessage {
+pub enum Message {
     Message {
-        author: CCAuthorTag,
-        source_channel: CCChannelTag,
+        author: AuthorTag,
+        source_channel: ChannelTag,
         raw_contents: String,
-        contents: Vec<CCMessageFragment>,
+        contents: Vec<MessageFragment>,
     },
     Control(Command),
 }
 
 #[derive(Clone, Debug)]
-pub enum CCMessageFragment {
+pub enum MessageFragment {
     Command(),
     Plain(String),
 }
@@ -47,11 +47,11 @@ pub enum Command {
 
 pub struct ProtocolHandles {
     pub protocol_tag: ProtocolTag,
-    pub sender: Sender<CCMessage>,
-    pub receiver: Receiver<CCMessage>,
+    pub sender: Sender<Message>,
+    pub receiver: Receiver<Message>,
 }
 
-pub trait CCProtocol {
+pub trait Protocol {
     fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles>;
 }
 
@@ -77,7 +77,7 @@ pub struct ConcordCore {
     runtime: Runtime,
     command_sender: Sender<Command>,
     command_receiver: Receiver<Command>,
-    protocol_senders: Arc<RwLock<HashMap<ProtocolTag, Sender<CCMessage>>>>,
+    protocol_senders: Arc<RwLock<HashMap<ProtocolTag, Sender<Message>>>>,
 }
 
 impl ConcordCore {
@@ -137,7 +137,7 @@ impl ConcordCore {
 
     pub fn initialize_protocol<T>(&mut self, _protocol: T) -> CCResult<&mut Self>
     where
-        T: CCProtocol,
+        T: Protocol,
     {
         let ProtocolHandles {
             protocol_tag,
@@ -154,12 +154,12 @@ impl ConcordCore {
             .spawn(stream::iter_ok(receiver).for_each(move |msg| {
                 trace!("Received message: {:?}", msg);
                 match msg {
-                    CCMessage::Message { contents, .. } => for fragment in &contents {
-                        if let CCMessageFragment::Command() = fragment {
+                    Message::Message { contents, .. } => for fragment in &contents {
+                        if let MessageFragment::Command() = fragment {
                             control_sender.send(Command::Shutdown).unwrap();
                         }
                     },
-                    CCMessage::Control(command) => control_sender.send(command).unwrap(),
+                    Message::Control(command) => control_sender.send(command).unwrap(),
                 }
                 Ok(())
             }));
@@ -232,7 +232,7 @@ impl ConcordCore {
                     info!("Control: {:?}", command);
                     match command {
                         Command::Shutdown => {
-                            let message = CCMessage::Control(Command::Shutdown);
+                            let message = Message::Control(Command::Shutdown);
                             for sender in protocol_txs.read().unwrap().values() {
                                 sender.send(message.clone()).unwrap();
                             }

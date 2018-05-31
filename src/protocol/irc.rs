@@ -1,7 +1,7 @@
-use irc_crate::client::prelude::*;
+use irc_crate::client::prelude as irc;
 use protocol::*;
 
-impl From<Message> for CCMessage {
+impl From<Message> for irc::Message {
     fn from(msg: Message) -> Self {
         unimplemented!();
         /*let (channel, text) = match msg.command.clone() {
@@ -26,7 +26,7 @@ impl From<Message> for CCMessage {
 
 pub struct Irc;
 
-impl CCProtocol for Irc {
+impl Protocol for Irc {
     fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         unimplemented!();
         /*let irc_config = Config {

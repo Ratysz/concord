@@ -4,15 +4,15 @@ use systray;
 
 pub struct SysTray;
 
-impl CCProtocol for SysTray {
+impl Protocol for SysTray {
     fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
-        let (in_tx, in_rx) = channel::<CCMessage>();
-        let (out_tx, out_rx) = channel::<CCMessage>();
+        let (in_tx, in_rx) = channel::<Message>();
+        let (out_tx, out_rx) = channel::<Message>();
         let (intra_tx, intra_rx) = channel::<()>();
 
         runtime.spawn(future::loop_fn((in_rx, intra_tx), |(in_rx, intra_tx)| {
             if let Ok(message) = in_rx.recv_timeout(time::Duration::from_secs(1)) {
-                if let CCMessage::Control(command) = message {
+                if let Message::Control(command) = message {
                     match command {
                         Command::Shutdown => {
                             intra_tx.send(()).unwrap();
@@ -38,7 +38,7 @@ impl CCProtocol for SysTray {
                         if intra_rx.try_recv().is_err() {
                             if let Ok(_) = tray_rx.recv_timeout(time::Duration::from_secs(1)) {
                                 trace!("SysTray sending shutdown command.");
-                                out_tx.send(CCMessage::Control(Command::Shutdown)).unwrap();
+                                out_tx.send(Message::Control(Command::Shutdown)).unwrap();
                             }
                             Ok(future::Loop::Continue((out_tx, intra_rx, tray_rx, tray)))
                         } else {

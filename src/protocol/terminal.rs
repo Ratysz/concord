@@ -1,15 +1,15 @@
 use protocol::*;
 use std::{thread, time};
 
-impl From<String> for CCMessage {
+impl From<String> for Message {
     fn from(text: String) -> Self {
         let mut contents = Vec::new();
         if text.contains("shutdown") {
-            contents.push(CCMessageFragment::Command());
+            contents.push(MessageFragment::Command());
         }
-        CCMessage::Message {
-            author: CCAuthorTag("term"),
-            source_channel: CCChannelTag("term"),
+        Message::Message {
+            author: AuthorTag("term"),
+            source_channel: ChannelTag("term"),
             raw_contents: text,
             contents,
         }
@@ -33,32 +33,32 @@ impl From<String> for CCMessage {
 
 pub struct Terminal;
 
-impl CCProtocol for Terminal {
+impl Protocol for Terminal {
     fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         trace!("Starting up.");
-        let (in_tx, in_rx) = channel::<CCMessage>();
-        let (out_tx, out_rx) = channel::<CCMessage>();
+        let (in_tx, in_rx) = channel::<Message>();
+        let (out_tx, out_rx) = channel::<Message>();
 
         let in_tx_clone = in_tx.clone();
         thread::spawn(move || loop {
             let line: String = read!("{}\n");
-            in_tx_clone.send(CCMessage::from(line)).unwrap();
+            in_tx_clone.send(Message::from(line)).unwrap();
         });
 
         runtime.spawn(stream::iter_ok(in_rx).for_each(move |message| {
             let mut send = false;
             match message {
-                CCMessage::Control(command) => match command {
+                Message::Control(command) => match command {
                     Command::Shutdown => {
                         trace!("Terminating.");
                         return Err(());
                     }
                 },
-                CCMessage::Message {
+                Message::Message {
                     ref author,
                     ref raw_contents,
                     ..
-                } => if author == &CCAuthorTag("term") {
+                } => if author == &AuthorTag("term") {
                     send = true;
                 } else {
                     println!("{:?}", raw_contents);

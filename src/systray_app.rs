@@ -5,7 +5,7 @@ use systray;
 pub struct SysTray;
 
 impl Protocol for SysTray {
-    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
+    fn initialize(self, runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         let (in_tx, in_rx) = channel::<Message>();
         let (out_tx, out_rx) = channel::<Message>();
         let (intra_tx, intra_rx) = channel::<()>();

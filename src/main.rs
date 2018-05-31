@@ -36,7 +36,7 @@ fn main() {
         config
     };
 
-    let mut concord = ConcordCore::new(config).expect("Could not initialize Concord!");
+    let mut concord = ConcordCore::new(&config).expect("Could not initialize Concord!");
     concord
         .initialize_protocol(systray_app::SysTray)
         .expect("Couldn't initialize SysTray!");

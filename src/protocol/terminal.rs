@@ -3,10 +3,7 @@ use std::{thread, time};
 
 impl From<String> for Message {
     fn from(text: String) -> Self {
-        let mut contents = Vec::new();
-        if text.contains("shutdown") {
-            contents.push(MessageFragment::Command());
-        }
+        let contents = vec![MessageFragment::Plain(text.clone())];
         Message::Message {
             author: AuthorTag("term"),
             source_channel: ChannelTag("term"),
@@ -34,7 +31,7 @@ impl From<String> for Message {
 pub struct Terminal;
 
 impl Protocol for Terminal {
-    fn initialize(runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
+    fn initialize(self, runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
         trace!("Starting up.");
         let (in_tx, in_rx) = channel::<Message>();
         let (out_tx, out_rx) = channel::<Message>();

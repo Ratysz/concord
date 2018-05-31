@@ -12,7 +12,6 @@ extern crate serde_derive;
 #[macro_use]
 extern crate text_io;
 extern crate tokio;
-extern crate tokio_core;
 extern crate tokio_threadpool;
 
 pub mod protocol;

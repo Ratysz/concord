@@ -5,7 +5,6 @@ use std::sync::{Arc, RwLock};
 use std::thread;
 use std::time;
 pub use tokio::{prelude::*, runtime::Runtime};
-pub use tokio_core::reactor::Timeout;
 pub use tokio_threadpool::{blocking, BlockingError};
 
 #[cfg(feature = "discord_protocol")]

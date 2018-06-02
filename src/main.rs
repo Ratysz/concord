@@ -50,11 +50,11 @@ fn main() {
         .initialize_protocol(Discord)
         .expect("Could not initialize Discord!");*/
 
-    /*#[cfg(feature = "irc_protocol")]
+    #[cfg(feature = "irc_protocol")]
     concord
         //.initialize_protocol(Irc::new(&config))
         .initialize_protocol(Irc)
-        .expect("Could not initialize Irc!");*/
+        .expect("Could not initialize Irc!");
 
     #[cfg(feature = "terminal_protocol")]
     concord

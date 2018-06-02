@@ -3,11 +3,13 @@ extern crate chrono;
 extern crate concord_core;
 extern crate config;
 extern crate fern;
+extern crate futures;
 #[macro_use]
 extern crate log;
 extern crate systray;
 extern crate tokio;
 extern crate tokio_threadpool;
+extern crate tokio_timer;
 
 use concord_core::*;
 
@@ -24,8 +26,9 @@ fn main() {
                 message
             ))
         })
-        .level_for("tokio_threadpool", log::LevelFilter::Debug)
-        .level(log::LevelFilter::Trace)
+        .level(log::LevelFilter::Debug)
+        .level_for("tokio_reactor", log::LevelFilter::Info)
+        .level_for("concord_core", log::LevelFilter::Trace)
         .chain(std::io::stdout())
         .apply()
         .unwrap();
@@ -45,9 +48,9 @@ fn main() {
     concord
         //.initialize_protocol(Discord::new(&config))
         .initialize_protocol(Discord)
-        .expect("Could not initialize Discord!");
+        .expect("Could not initialize Discord!");*/
 
-    #[cfg(feature = "irc_protocol")]
+    /*#[cfg(feature = "irc_protocol")]
     concord
         //.initialize_protocol(Irc::new(&config))
         .initialize_protocol(Irc)

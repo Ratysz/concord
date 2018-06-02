@@ -1,55 +1,113 @@
 use concord_core::protocol::*;
 use std::time;
 use systray;
+use tokio;
+use tokio_timer;
 
 pub struct SysTray;
 
+use futures;
+use std;
+
+pub struct ReceiverStream<T>(std::sync::mpsc::Receiver<T>);
+
+impl<T> futures::stream::Stream for ReceiverStream<T> {
+    type Item = T;
+    type Error = ();
+
+    fn poll(&mut self) -> futures::Poll<Option<Self::Item>, Self::Error> {
+        match self.0.try_recv() {
+            Ok(message) => Ok(futures::Async::Ready(Some(message))),
+            Err(e) => match e {
+                std::sync::mpsc::TryRecvError::Empty => Ok(futures::Async::NotReady),
+                std::sync::mpsc::TryRecvError::Disconnected => Ok(futures::Async::Ready(None)),
+            },
+        }
+    }
+}
+
+fn periodic_wake_up(
+    task: futures::task::Task,
+    period: std::time::Duration,
+) -> futures::sync::oneshot::Sender<()> {
+    let (kill_tx, kill_rx) = futures::sync::oneshot::channel::<()>();
+    tokio::spawn(future::loop_fn(
+        (period, task, kill_rx),
+        |(period, task, mut kill_rx)| {
+            let should_continue = Ok(futures::Async::NotReady) == kill_rx.poll();
+            tokio_timer::Delay::new(std::time::Instant::now() + period)
+                .map_err(|_| ())
+                .and_then(move |_| {
+                    task.notify();
+                    if should_continue {
+                        return Ok(future::Loop::Continue((period, task, kill_rx)));
+                    }
+                    Ok(future::Loop::Break(()))
+                })
+        },
+    ));
+    kill_tx
+}
+
 impl Protocol for SysTray {
     fn initialize(self, runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
-        let (in_tx, in_rx) = channel::<Message>();
-        let (out_tx, out_rx) = channel::<Message>();
-        let (intra_tx, intra_rx) = channel::<()>();
+        debug!("Initializing.");
+        let (in_tx, in_rx) = unbounded();
+        let (out_tx, out_rx) = unbounded();
+        let (tray_tx, tray_rx) = std::sync::mpsc::channel();
+        let tray = {
+            let tray_tx = tray_tx.clone();
+            systray::api::api::Window::new(tray_tx).unwrap()
+        };
+        tray.add_menu_entry(0, &"quit".to_string()).unwrap();
 
-        runtime.spawn(future::loop_fn((in_rx, intra_tx), |(in_rx, intra_tx)| {
-            if let Ok(message) = in_rx.recv_timeout(time::Duration::from_secs(1)) {
-                if let Message::Control(command) = message {
-                    match command {
-                        Command::Shutdown => {
-                            intra_tx.send(()).unwrap();
-                            trace!("Receiver task done.");
-                            return Ok(future::Loop::Break(()));
+        runtime.spawn(future::lazy(|| {
+            let task = futures::task::current();
+            let kill_tx = periodic_wake_up(task, time::Duration::from_millis(16));
+            ReceiverStream(tray_rx)
+                .for_each(move |message| {
+                    trace!("Tray received message: {}", message.menu_index);
+                    match message.menu_index {
+                        0 => {
+                            debug!("Tray sending: {:?}", &Command::Shutdown);
+                            tokio::spawn(
+                                out_tx
+                                    .clone()
+                                    .send(Message::Control(Command::Shutdown))
+                                    .then(|_| Ok(())),
+                            );
                         }
+                        1 => {
+                            debug!("Tray terminating.");
+                            tray.shutdown().unwrap();
+                            return Err(());
+                        }
+                        _ => unimplemented!(),
                     }
-                }
-            }
-            Ok(future::Loop::Continue((in_rx, intra_tx)))
+                    Ok(())
+                })
+                .then(move |_| {
+                    kill_tx.send(()).unwrap();
+                    Ok(())
+                })
         }));
 
-        runtime.spawn(
-            future::lazy(|| {
-                let (tray_tx, tray_rx) = channel();
-                let tray = systray::api::api::Window::new(tray_tx).unwrap();
-                tray.add_menu_entry(0, &"quit".to_string()).unwrap();
-                Ok((tray_rx, tray))
-            }).and_then(|(tray_rx, tray)| {
-                future::loop_fn(
-                    (out_tx, intra_rx, tray_rx, tray),
-                    |(out_tx, intra_rx, tray_rx, tray)| {
-                        if intra_rx.try_recv().is_err() {
-                            if let Ok(_) = tray_rx.recv_timeout(time::Duration::from_secs(1)) {
-                                trace!("SysTray sending shutdown command.");
-                                out_tx.send(Message::Control(Command::Shutdown)).unwrap();
-                            }
-                            Ok(future::Loop::Continue((out_tx, intra_rx, tray_rx, tray)))
-                        } else {
-                            trace!("Sender task done.");
-                            tray.shutdown().unwrap();
-                            Ok(future::Loop::Break(()))
+        runtime.spawn(in_rx.for_each(move |message| {
+            trace!("Received message: {:?}", message);
+            match message {
+                Message::Control(command) => match command {
+                    Command::Shutdown => {
+                        if let Err(e) = tray_tx.send(systray::SystrayEvent { menu_index: 1 }) {
+                            error!("Failed to transmit: {}", e);
                         }
-                    },
-                )
-            }),
-        );
+                        debug!("Terminating.");
+                        return Err(());
+                    }
+                },
+                _ => unimplemented!(),
+            }
+            Ok(())
+        }));
 
         Ok(ProtocolHandles {
             protocol_tag: ProtocolTag("systray"),

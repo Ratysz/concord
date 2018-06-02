@@ -17,7 +17,7 @@ impl From<Message> for s_model::Message {
 pub struct Discord;
 
 struct Handler {
-    tx: Sender<Message>,
+    tx: UnboundedSender<Message>,
     bot_user_id: RwLock<Option<s_id::UserId>>,
     // Needs interior mutability, is threaded, and unknown at init.
 }

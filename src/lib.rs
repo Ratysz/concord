@@ -1,4 +1,6 @@
 extern crate config;
+extern crate failure;
+extern crate futures;
 #[cfg(feature = "irc_protocol")]
 extern crate irc as irc_crate;
 #[macro_use]
@@ -12,6 +14,8 @@ extern crate serde_derive;
 #[macro_use]
 extern crate text_io;
 extern crate tokio;
+#[cfg(feature = "terminal_protocol")]
+extern crate tokio_fs;
 extern crate tokio_threadpool;
 
 pub mod protocol;

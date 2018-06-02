@@ -1,12 +1,12 @@
 use protocol::*;
-use std::{thread, time};
+use std::thread;
 
 impl From<String> for Message {
     fn from(text: String) -> Self {
         let contents = vec![MessageFragment::Plain(text.clone())];
         Message::Message {
             author: AuthorTag("term"),
-            source_channel: ChannelTag("term"),
+            source: ChannelTag("term"),
             raw_contents: text,
             contents,
         }
@@ -32,22 +32,28 @@ pub struct Terminal;
 
 impl Protocol for Terminal {
     fn initialize(self, runtime: &mut Runtime) -> CCResult<ProtocolHandles> {
-        trace!("Starting up.");
-        let (in_tx, in_rx) = channel::<Message>();
-        let (out_tx, out_rx) = channel::<Message>();
+        debug!("Initializing.");
+        let (in_tx, in_rx) = unbounded();
+        let (out_tx, out_rx) = unbounded();
 
-        let in_tx_clone = in_tx.clone();
-        thread::spawn(move || loop {
-            let line: String = read!("{}\n");
-            in_tx_clone.send(Message::from(line)).unwrap();
-        });
+        {
+            let in_tx = in_tx.clone();
+            thread::spawn(move || loop {
+                let line: String = read!("{}\n");
+                trace!("Fat thread sending line: {:?}", &line);
+                if let Err(e) = in_tx.clone().send(Message::from(line)).wait() {
+                    error!("Fat thread failed to transmit: {}", e);
+                }
+            });
+        }
 
-        runtime.spawn(stream::iter_ok(in_rx).for_each(move |message| {
+        runtime.spawn(in_rx.for_each(move |message| {
+            trace!("Received message: {:?}", &message);
             let mut send = false;
             match message {
                 Message::Control(command) => match command {
                     Command::Shutdown => {
-                        trace!("Terminating.");
+                        debug!("Terminating.");
                         return Err(());
                     }
                 },
@@ -58,12 +64,13 @@ impl Protocol for Terminal {
                 } => if author == &AuthorTag("term") {
                     send = true;
                 } else {
+                    trace!("Posting message: {:?}", &message);
                     println!("{:?}", raw_contents);
                 },
             }
             if send {
                 trace!("Sending message: {:?}", &message);
-                out_tx.send(message).unwrap();
+                spawn(out_tx.clone().send(message).then(|_| Ok(())));
             }
             Ok(())
         }));
